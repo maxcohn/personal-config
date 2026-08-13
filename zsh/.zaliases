@@ -1,0 +1,22 @@
+# Various aliases
+
+# Add colors to common commands
+alias ls='ls --color=auto'
+alias grep='grep --color=auto'
+alias fgrep='fgrep --color=auto'
+alias egrep='egrep --color=auto'
+
+alias more=less
+
+alias open=xdg-open
+
+# for when the side of my space bar doesn't work
+alias cd..='cd ..'
+
+alias ll='ls -ahlF'
+alias la='ls -A'
+alias l='ls -CF'
+
+alias xcopy='xclip -selection clipboard'
+
+alias k='kubectl'
