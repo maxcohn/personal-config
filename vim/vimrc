@@ -1,0 +1,89 @@
+
+filetype plugin on
+
+let mapleader = "_"
+
+" Line numbers
+set number
+
+" Default tab = 4 spaces
+set tabstop=4
+
+" '>' and '<' shift spacing
+set shiftwidth=4
+
+"set smartindent
+set autoindent
+set noexpandtab
+" Wrapped words stay indented
+set breakindent
+
+syntax on
+
+"" Search options
+
+" Highlight matched searches
+set hlsearch
+" Update highlighting with every character typed
+set incsearch
+
+" Make all searching use extended regular expressions (map all searches to add \v)
+nnoremap / /\v
+vnoremap / /\v
+cnoremap %s/ %s/\v
+
+nnoremap <leader>n :nohl<CR>
+
+" Blink instead of beep on invalid operation
+set visualbell
+
+colorscheme onedark
+
+
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Custom commands
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+command -range Listify <line1>,<line2>s/^\(\w\)/* \1/ | nohl
+
+" Copy the contents to the x11 clipboard
+command -range CopyClip <line1>,<line2>w !xclip -sel clip
+
+" Copy all matches into specified register
+function! CopyMatches(reg)
+    let hits = []
+    %s//\=len(add(hits, submatch(0))) ? submatch(0) : ''/gne
+    let reg = empty(a:reg) ? '+' : a:reg
+    execute 'let @'.reg.' = join(hits, "\n") . "\n"'
+endfunction
+command! -register CopyMatches call CopyMatches(<q-reg>)
+
+" Copy all href links from the buffer into a register. These can be both relative
+" or absolute links
+function! CopyHrefLinks(reg)
+	" highlight all href="..." matches
+	/href=".\{-}"/
+
+	" copy mayches into our selected registers
+	call CopyMatches(a:reg)
+
+	" remove "href=" and quotes from selected text
+	execute 'let @'.a:reg.' = substitute(getreg(a:reg),"\\(href=\\)\\|\\(\"\\)","","g")'
+endfunction
+command! -register CopyHrefLinks call CopyHrefLinks(<q-reg>)
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" File type specific
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Python
+"autocmd Filetype python setlocal tabstop=4
+
+let g:ycm_filetype_blacklist = { 'sql': 1, 'markdown': 1 }
+
+let g:tex_flavor = 'latex'
+
+" Assembly
+let g:asmsyntax = 'nasm'
+
+autocmd BufNewFile,BufRead *.sig set syntax=sml
+autocmd Filetype nasm setlocal tabstop=8
