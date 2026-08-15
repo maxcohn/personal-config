@@ -42,25 +42,9 @@ HISTSIZE=20000
 SAVEHIST=10000000
 HISTFILE=~/.zsh_history
 
-hash -d class="$HOME/Code/Fall2020"
-
 # Load aliases
 source ~/.zaliases
 
-
-
-export PATH="$HOME/.poetry/bin:$PATH"
-
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
-
-
-# Add RVM to PATH for scripting. Make sure this is the last PATH variable change.
-export PATH="$PATH:$HOME/.rvm/bin"
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
-
-# Added by LM Studio CLI (lms)
-export PATH="$PATH:/home/max/.lmstudio/bin"
-# End of LM Studio CLI section
+# Machine-specific config: untracked, never committed
+[ -f ~/.zshrc.local ] && source ~/.zshrc.local
 

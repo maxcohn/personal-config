@@ -1,0 +1,2 @@
+FROM docker.io/library/fedora:latest
+RUN dnf install -y python3 && dnf clean all

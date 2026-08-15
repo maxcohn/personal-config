@@ -87,3 +87,8 @@ let g:asmsyntax = 'nasm'
 
 autocmd BufNewFile,BufRead *.sig set syntax=sml
 autocmd Filetype nasm setlocal tabstop=8
+
+" Machine-specific config: untracked, never committed
+if filereadable(expand("~/.vimrc.local"))
+	source ~/.vimrc.local
+endif

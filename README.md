@@ -1,0 +1,195 @@
+# personal-config
+
+My machine configs, plus the tooling to move them onto a machine and keep track
+of the software I expect to be installed. Works across Linux distros and macOS.
+
+Configs are copied onto the machine and get synced on demand.
+
+## Usage
+
+```sh
+./sync.py status   [module...]              # per-file: ok / modified / missing
+./sync.py diff     [module...]              # unified diff, repo vs machine
+./sync.py deploy   [module...] [--dry-run]  # repo -> machine
+./sync.py capture  [module...] [--dry-run]  # machine -> repo (tracked files only)
+
+./sync.py packages status  [--manager NAME]
+./sync.py packages install [--dry-run] [--manager NAME]
+```
+
+With no module arguments, every module is used. `status` exits non-zero when
+anything has drifted, so it works in a prompt or a cron check.
+
+Python 3.8+, standard library only - nothing to install before bootstrapping a
+new machine.
+
+## Modules
+
+Config lives under `modules/`, one directory per module, keeping the repo root
+for higher-level things (the tooling, the tests, `packages.json`).
+
+```
+modules/
+	vim/     manifest.json, vimrc, colors/, autoload/, spell/
+	zsh/     manifest.json, .zshrc, .zaliases
+```
+
+A module is any directory inside `modules/` containing a `manifest.json`. Adding
+one is just creating the directory; there is no central registry.
+
+```json
+{
+	"destination": "~/.vim/",
+	"ignore": [".netrwhist"]
+}
+```
+
+- **`destination`** - the directory the module's files map into, preserving
+  relative paths. `modules/zsh/.zshrc` -> `~/.zshrc`;
+  `modules/vim/colors/onedark.vim` -> `~/.vim/colors/onedark.vim`.
+- **`ignore`** - glob patterns skipped in both directions. Matched against both
+  the path relative to the module and the bare filename. `manifest.json` is
+  always skipped.
+
+**The files in the repo define what's managed.** `capture` only pulls back files
+the repo already has, so plugin directories, history files, and other runtime
+junk in the destination are ignored. To start tracking a new file, add it to the
+module directory yourself.
+
+## Machine-local config
+
+Anything machine-specific or private (secrets, work aliases, host-specific
+paths) goes in an untracked `.local` file that the tracked config sources if it
+exists:
+
+| Tracked, deployed | Untracked, per-machine |
+| --- | --- |
+| `~/.zshrc` | `~/.zshrc.local` |
+| `~/.vim/vimrc` | `~/.vimrc.local` |
+
+This repo is public - nothing private should ever land in a tracked file.
+
+## Software (`packages.json`)
+
+One entry per logical tool. The key is the name used everywhere unless an
+install method says otherwise, so the common case is an empty object:
+
+```json
+{
+	"ripgrep": {},
+	"fd": { "apt": "fd-find", "bin": "fdfind" },
+	"xclip": { "brew": null },
+	"eza": { "apt": null, "cargo": "eza@0.18.0" },
+	"shellcheck": {
+		"release": {
+			"url": "https://github.com/koalaman/shellcheck/releases/download/v{version}/shellcheck-v{version}.{os}.{arch}.tar.xz",
+			"version": "0.10.0",
+			"bin": "shellcheck-v{version}/shellcheck"
+		},
+		"prefer": "release"
+	}
+}
+```
+
+Versions of anything installed outside a system package manager are **pinned in
+this repo**. Upgrading a tool is an explicit commit, so machines don't drift
+apart on their own.
+
+### Install methods
+
+**System managers** - `apt`, `pacman`, `dnf`, `brew`. Omit the key to use the
+entry name; give a string to rename; give `null` to skip the package on that
+manager. Prefix a brew value with `cask:` for casks, or a pacman value with
+`aur:` to route it through `paru`/`yay` (reported as manual if neither is
+installed).
+
+**Language installers** - `cargo`, `go`, `pipx`. Value is `name` or
+`name@version`; for `go`, the full module path. Only considered when the
+toolchain is on `PATH`.
+
+**`release`** - a prebuilt binary from a release page.
+
+| Field | Meaning |
+| --- | --- |
+| `url` | Template; `{version}`, `{os}`, `{arch}` are substituted |
+| `version` | Pinned version |
+| `bin` | Path to the executable inside the archive (`{version}` allowed) |
+| `os_map`, `arch_map` | Optional overrides when a project spells platforms its own way |
+
+Defaults are `linux`/`darwin` and `x86_64`/`aarch64`. `.tar.gz`, `.tar.xz`,
+`.zip`, and raw binaries are handled; the binary lands in `~/.local/bin/`.
+Installed versions are recorded in
+`~/.local/state/personal-config/installed.json` (machine-local, untracked) so
+`status` can report *outdated* against the pinned version without shelling out
+to `--version`. Detection looks in `~/.local/bin` directly rather than at `PATH`,
+so a release install is still reported correctly on a machine that hasn't been
+set up yet - but `packages` warns when `~/.local/bin` isn't on `PATH`, since the
+tools won't actually be runnable there.
+
+**`prefer`** - name a method to use even when an earlier one is available.
+Without it, the order is: system manager -> language installer (if the toolchain
+exists) -> `release` -> `build`. The first available method wins.
+
+`install` only ever adds things: it installs what's missing and re-installs
+`release` entries whose pinned version moved. It never removes or downgrades.
+
+## Tests
+
+```sh
+./test.py                  # tier 1: fast, no container runtime needed
+./test.py --containers     # + tier 2: real package managers, per distro
+./test.py --distro arch    # restrict tier 2 to one image
+./test.py --rebuild        # force container images to rebuild
+./test.py -k release       # only tests matching a substring
+```
+
+Stdlib `unittest`, no dependencies. Nothing touches the real machine: tier 1 runs
+against a temp `HOME` and a temp copy of the repo, and tier 2 mounts the repo
+**read-only** into throwaway containers.
+
+**Tier 1** covers manifest and package-entry validation against this repo's real
+data, the pure helpers (method resolution, URL templating, archive-traversal
+rejection), and the whole CLI end to end. `release` downloads are served from a
+local `http.server` fixture, so the suite is hermetic and works offline.
+
+**Tier 2** runs sync.py inside Debian, Arch, Fedora, and Alpine containers, which
+is the only way to exercise pacman and dnf from one machine - and Alpine proves
+the tool degrades gracefully with no supported package manager rather than
+crashing. It skips with a clear message when neither podman nor docker is usable.
+Podman is preferred and works rootless.
+
+Two known gaps: **brew/macOS can't be containerized**, so its command construction
+is covered by unit tests only; and `packages install` assumes the system package
+manager's metadata is current - sync.py never runs `apt update` itself.
+
+## TODO
+
+- Implement the `build` install method.
+- Per-OS `destination` overrides in module manifests, if a config ever needs them.
+- Misc scripts to run on sync. Should be idempotent and allow for that last layer of flexibility in the system
+- Module destinations: `destination` may become an object keyed by OS
+(`{"default": "~/.config/x", "darwin": "~/Library/x"}`) if a config ever needs
+different paths per platform. Not implemented - today, OS differences are
+handled inside the config files themselves (`uname` checks in zsh, `has('mac')`
+in vim).
+
+### Build source
+
+**`build`** - clone a git repo and build it. **Designed, not yet implemented**:
+`sync.py` recognizes the key and tells you to install manually.
+
+```json
+"neovim": {
+	"apt": null,
+	"build": {
+		"git": "https://github.com/neovim/neovim",
+		"ref": "v0.10.1",
+		"deps": ["cmake", "gettext"],
+		"build": ["make CMAKE_BUILD_TYPE=Release", "make install CMAKE_INSTALL_PREFIX=~/.local"]
+	}
+}
+```
+
+Clones to `~/.local/src/<name>` at the pinned `ref`, runs each `build` command
+in the clone, and records a receipt like `release` does. `deps` are logical
+package names resolved through this same file.

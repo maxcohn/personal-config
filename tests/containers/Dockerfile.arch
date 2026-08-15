@@ -1,0 +1,3 @@
+# Sync databases are deliberately kept so `packages install` can resolve names.
+FROM docker.io/library/archlinux:latest
+RUN pacman -Sy --noconfirm python

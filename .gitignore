@@ -1,0 +1,5 @@
+.netrwhist
+*.local
+__pycache__/
+*.swp
+*.swo

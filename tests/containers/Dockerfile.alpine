@@ -1,0 +1,3 @@
+# No apt/pacman/dnf: proves sync.py degrades gracefully with no supported manager.
+FROM docker.io/library/alpine:latest
+RUN apk add --no-cache python3
