@@ -2,4 +2,6 @@ Move in config files
 Design directory structure
 JSON file for tracking where the files go?
 Script to move files back and forth in sync with the current machine?
+	Includes dry run to see what would go where and shows a diff
+	needs to move files out and in
 Overrides per OS?
