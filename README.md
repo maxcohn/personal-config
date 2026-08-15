@@ -193,3 +193,15 @@ in vim).
 Clones to `~/.local/src/<name>` at the pinned `ref`, runs each `build` command
 in the clone, and records a receipt like `release` does. `deps` are logical
 package names resolved through this same file.
+
+### Package archive files (.deb, .rpm, etc)
+
+Should support pulling and running package archives.
+
+### Appimage support
+
+Should support Appimage files
+
+### Adding third party package repositories
+
+Should support adding third party package repositories to then pull from
