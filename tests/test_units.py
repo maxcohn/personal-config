@@ -138,9 +138,9 @@ class TestLanguageInstallCommands(unittest.TestCase):
         self.assertIn("go install example.com/x@v1.2.3",
                       self.run_install("go", "example.com/x@v1.2.3"))
 
-    def test_pipx_pinned(self):
-        self.assertIn("pipx install black==24.1.0",
-                      self.run_install("pipx", "black@24.1.0"))
+    def test_uv_pinned(self):
+        self.assertIn("uv tool install black==24.1.0",
+                      self.run_install("uv", "black@24.1.0"))
 
 
 class TestReleaseUrl(unittest.TestCase):

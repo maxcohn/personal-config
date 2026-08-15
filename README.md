@@ -103,7 +103,7 @@ manager. Prefix a brew value with `cask:` for casks, or a pacman value with
 `aur:` to route it through `paru`/`yay` (reported as manual if neither is
 installed).
 
-**Language installers** - `cargo`, `go`, `pipx`. Value is `name` or
+**Language installers** - `cargo`, `go`, `uv`. Value is `name` or
 `name@version`; for `go`, the full module path. Only considered when the
 toolchain is on `PATH`.
 
@@ -113,7 +113,7 @@ toolchain is on `PATH`.
 | --- | --- |
 | `url` | Template; `{version}`, `{os}`, `{arch}` are substituted |
 | `version` | Pinned version |
-| `bin` | Path to the executable inside the archive (`{version}` allowed) |
+| `bin` | Path to the executable inside the archive (same substitutions as `url`) |
 | `os_map`, `arch_map` | Optional overrides when a project spells platforms its own way |
 
 Defaults are `linux`/`darwin` and `x86_64`/`aarch64`. `.tar.gz`, `.tar.xz`,

@@ -35,7 +35,7 @@ RECEIPTS_FILE = HOME / ".local" / "state" / "personal-config" / "installed.json"
 LOCAL_BIN = HOME / ".local" / "bin"
 
 SYSTEM_MANAGERS = ["apt", "pacman", "dnf", "brew"]
-LANG_INSTALLERS = ["cargo", "go", "pipx"]
+LANG_INSTALLERS = ["cargo", "go", "uv"]
 NON_METHOD_KEYS = {"prefer", "bin"}
 
 DEFAULT_OS_MAP = {"linux": "linux", "darwin": "darwin"}
@@ -359,12 +359,12 @@ def install_via_lang(lang, spec, dry_run):
             run_or_print(["cargo", "install", spec], dry_run)
     elif lang == "go":
         run_or_print(["go", "install", spec if "@" in spec else spec + "@latest"], dry_run)
-    elif lang == "pipx":
+    elif lang == "uv":
         if "@" in spec:
             pkg, version = spec.rsplit("@", 1)
-            run_or_print(["pipx", "install", "{}=={}".format(pkg, version)], dry_run)
+            run_or_print(["uv", "tool", "install", "{}=={}".format(pkg, version)], dry_run)
         else:
-            run_or_print(["pipx", "install", spec], dry_run)
+            run_or_print(["uv", "tool", "install", spec], dry_run)
 
 
 def cmd_packages(args):
