@@ -469,8 +469,11 @@ def os_release_codename():
 
 
 def dpkg_architecture():
-    proc = subprocess.run(["dpkg", "--print-architecture"],
-                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        proc = subprocess.run(["dpkg", "--print-architecture"],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except OSError:  # no dpkg at all -- a bare traceback would be no help here
+        sys.exit("repo: architectures \"auto\" needs a working dpkg")
     arch = proc.stdout.decode().strip()
     if proc.returncode != 0 or not arch:
         sys.exit("repo: architectures \"auto\" needs a working dpkg")
@@ -664,6 +667,29 @@ def enarmor(data):
             + "\n=" + checksum + "\n-----END PGP PUBLIC KEY BLOCK-----\n")
 
 
+def dearmor(text):
+    """ASCII armor -> the binary key, verifying the vendor's CRC24 on the way.
+
+    Everything in keys/ is stored in enarmor's one canonical form, so an
+    already-armored download is decoded and re-armored rather than passed
+    through: vendors disagree about armor headers (Microsoft ships a "Version:"
+    line, most ship none) and those would otherwise show up as diffs that aren't
+    key changes.
+    """
+    begin = "-----BEGIN PGP PUBLIC KEY BLOCK-----"
+    if text.count(begin) != 1:
+        sys.exit("  expected one armored key block, found {}".format(text.count(begin)))
+    body = text.split(begin, 1)[1].split("-----END PGP PUBLIC KEY BLOCK-----", 1)[0]
+    # Armor headers run from BEGIN to the first blank line; the body follows.
+    headers, _, rest = body.partition("\n\n")
+    lines = [ln.strip() for ln in (rest or headers).splitlines() if ln.strip()]
+    checksum = lines.pop() if lines and lines[-1].startswith("=") else None
+    data = base64.b64decode("".join(lines))
+    if checksum and enarmor(data).splitlines()[-2] != checksum:
+        sys.exit("  that key's CRC24 does not match its body -- truncated download?")
+    return data
+
+
 def fetch_keys(packages, names):
     """Download a pinned key_url into keys/ for review and commit.
 
@@ -686,7 +712,7 @@ def fetch_keys(packages, names):
         with urllib.request.urlopen(url) as resp:
             data = resp.read()
         if data.lstrip().startswith(b"-----BEGIN PGP"):
-            text = data.decode()
+            text = enarmor(dearmor(data.decode()))
         elif data and bytearray(data)[0] & 0x80:
             text = enarmor(data)
         else:

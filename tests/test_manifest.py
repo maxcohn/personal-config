@@ -8,6 +8,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import sync  # noqa: E402
@@ -240,15 +241,21 @@ class TestRepoBlocks(unittest.TestCase):
                     self.assertIn(path.resolve(), referenced, "key is unreferenced")
 
     def test_specs_render_without_error(self):
-        for name, _entry, spec in self.apt_blocks():
-            with self.subTest(package=name):
-                rendered = sync.render_apt_source(sync.apt_repo_name(name, spec), spec)
-                self.assertIn("Signed-By: /etc/apt/keyrings/", rendered)
-                self.assertTrue(rendered.endswith("\n"))
+        """"auto" is resolved with stubs: this asserts the data is renderable, not
+        that whoever runs the suite is sitting on Ubuntu with dpkg installed."""
+        with mock.patch.object(sync, "os_release_codename", lambda: "noble"), \
+             mock.patch.object(sync, "dpkg_architecture", lambda: "amd64"):
+            for name, _entry, spec in self.apt_blocks():
+                with self.subTest(package=name):
+                    rendered = sync.render_apt_source(sync.apt_repo_name(name, spec), spec)
+                    self.assertIn("Signed-By: /etc/apt/keyrings/", rendered)
+                    self.assertTrue(rendered.endswith("\n"))
 
     def test_no_conflicting_repo_definitions(self):
         """Two entries may share a repo name only if they render identically."""
-        sync.repo_specs(self.packages, "apt")
+        with mock.patch.object(sync, "os_release_codename", lambda: "noble"), \
+             mock.patch.object(sync, "dpkg_architecture", lambda: "amd64"):
+            sync.repo_specs(self.packages, "apt")
 
 
 if __name__ == "__main__":

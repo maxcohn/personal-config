@@ -379,6 +379,16 @@ Signed-By: /etc/apt/keyrings/toy.asc
         with mock.patch.object(sync, "dpkg_architecture", lambda: "arm64"):
             self.assertIn("Architectures: arm64", sync.render_apt_source("toy", spec))
 
+    def test_architectures_auto_without_dpkg_exits_cleanly(self):
+        """Real entries use "auto", so a machine with no dpkg reaches this and
+        deserves the message rather than a FileNotFoundError traceback."""
+        def no_dpkg(*_args, **_kwargs):
+            raise FileNotFoundError(2, "No such file or directory", "dpkg")
+
+        with mock.patch.object(sync.subprocess, "run", no_dpkg):
+            with self.assertRaises(SystemExit):
+                sync.dpkg_architecture()
+
     def test_no_templating_on_values(self):
         """dnf will need $releasever to survive this path untouched."""
         spec = dict(self.SPEC, uris="https://x/$releasever/{version}")
@@ -578,6 +588,40 @@ class TestEnarmor(unittest.TestCase):
         body = "".join(line for line in text.splitlines()[2:]
                        if line and not line.startswith(("=", "-")))
         self.assertEqual(sync.enarmor(base64.b64decode(body)), text)
+
+
+class TestDearmor(unittest.TestCase):
+    """An armored download is decoded and re-armored so keys/ holds one canonical
+    form, whatever armor headers the vendor happens to emit."""
+
+    KEY = TestEnarmor.KEY
+
+    def test_round_trips_with_enarmor(self):
+        self.assertEqual(sync.dearmor(sync.enarmor(self.KEY)), self.KEY)
+
+    def test_armor_headers_are_dropped(self):
+        """Microsoft serves its key with a "Version:" line; keeping it would make
+        every unrelated vendor tooling change look like a key rotation."""
+        armored = sync.enarmor(self.KEY).replace(
+            "BLOCK-----\n\n", "BLOCK-----\nVersion: BSN Pgp v1.1.0.0\nComment: x\n\n", 1)
+        self.assertEqual(sync.enarmor(sync.dearmor(armored)), sync.enarmor(self.KEY))
+
+    def test_missing_checksum_is_accepted(self):
+        armored = sync.enarmor(self.KEY).replace(
+            "\n=" + sync.enarmor(self.KEY).splitlines()[-2][1:], "", 1)
+        self.assertEqual(sync.dearmor(armored), self.KEY)
+
+    def test_bad_checksum_is_rejected(self):
+        """A truncated or corrupted download must not be canonicalised into a
+        self-consistent file that no later check can catch."""
+        good = sync.enarmor(self.KEY)
+        armored = good.replace(good.splitlines()[-2], "=AAAA", 1)
+        with self.assertRaises(SystemExit):
+            sync.dearmor(armored)
+
+    def test_two_blocks_are_rejected(self):
+        with self.assertRaises(SystemExit):
+            sync.dearmor(sync.enarmor(self.KEY) + sync.enarmor(self.KEY))
 
 
 if __name__ == "__main__":

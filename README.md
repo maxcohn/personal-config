@@ -179,13 +179,19 @@ there's nothing to translate. dnf would spell almost all of it differently
 | `key` | Repo-relative path to the vendored signing key. Installed to `/etc/apt/keyrings/` and named in `Signed-By` |
 | `key_url` | Where the key came from. Read by `fetch-key`, **never** at install time |
 | `types` | Defaults to `deb` |
-| `architectures` | Omitted by default, which lets apt use its own architecture list. Set it only for a repo that genuinely publishes one arch |
+| `architectures` | Omitted by default, which lets apt use its own architecture list. Set it for a repo that publishes one arch - or on any machine with a foreign architecture enabled, where apt would otherwise probe every vendor repo for `i386` |
 | `file` | Source-file stem, defaulting to the package key. Two packages sharing a `file` collapse onto one source file |
 
 Values are written through **verbatim** - there is no templating. The one
 exception is the keyword `"auto"`, accepted by `suites` (resolved from
 `VERSION_CODENAME` in `/etc/os-release`) and `architectures` (from `dpkg
 --print-architecture`), for the many repositories keyed to the release codename.
+
+`suites: "auto"` only makes sense when `uris` is distro-agnostic. A vendor that
+splits by distro forces a literal URI, and pairing that with `"auto"` asks an
+Ubuntu-only repository for a Debian codename - so docker and tailscale pin their
+suite the same way they pin their URI, and a release upgrade is an explicit
+commit.
 
 A repository is only added when the package would actually be installed from
 that manager here, so a tool that comes from `cargo` on this machine doesn't drag
@@ -194,6 +200,23 @@ its apt repository along, and the whole block is inert on macOS.
 `repos install` writes only what is missing or has drifted, and runs `apt-get
 update` **once, only when something actually changed**. It rewrites a file that
 was edited by hand, but never removes a repository you stopped declaring.
+
+On a fresh machine, `repos install` comes **before** `packages install` - a tool
+that lives in a vendor's repository can't be found until that repository exists.
+
+### Adding a repository
+
+1. Add the entry to `packages.json` with its `repo.apt` block. `suites: "auto"`
+   for a repo keyed to the release codename *and* served from one distro-agnostic
+   URI; `architectures: "auto"` unless you know you want apt's full list.
+2. `./sync.py repos fetch-key <name>`, then read the key before `git add` - see
+   below for why that review is the point.
+3. `./test.py -k repo` validates the block and the key's armor against the real
+   file, so a typo fails here rather than on a machine.
+4. `./sync.py repos install --dry-run`, then for real.
+5. If the repository already existed as a hand-written `.list`, delete it. sync.py
+   only writes deb822 `.sources`, so the old file would sit alongside the managed
+   one and apt would index the repository twice.
 
 ### Signing keys (`keys/`)
 
@@ -212,8 +235,15 @@ git add keys/github-cli.asc            # review it, then commit
 ```
 
 Most vendors serve a binary `.gpg`; `fetch-key` armors it on the way in so
-everything in `keys/` stays diffable text. When a vendor rotates their key, apt
-starts failing - re-run `fetch-key` and commit the diff.
+everything in `keys/` stays diffable text. A vendor that already serves armor is
+decoded and re-armored rather than passed through, because they disagree about
+armor headers - Microsoft ships a `Version:` line, most ship none - and those
+would otherwise land in the diff looking like key changes. The vendor's CRC24 is
+checked before that happens, so a truncated download can't be canonicalized into
+a self-consistent file.
+
+When a vendor rotates their key, apt starts failing - re-run `fetch-key` and
+commit the diff.
 
 ## Tests
 
@@ -290,16 +320,6 @@ Should support pulling and running package archives.
 
 Should support Appimage files
 
-### Bring this machine's existing repositories under management
-
-This laptop still carries third-party repositories added by hand before `repo`
-blocks existed: docker, vscode, mozilla, mullvad, tailscale, spotify,
-claude-desktop, and the keyd and papirus PPAs. Each is expressible today - one
-`repo` block, one `fetch-key`, one commit apiece.
-
-A PPA needs no special handling: it's
-`uris: https://ppa.launchpadcontent.net/<owner>/<name>/ubuntu/`, `suites: "auto"`,
-`components: main`, plus its Launchpad key. No `add-apt-repository` needed.
 
 ### Third party repositories for the other managers
 
