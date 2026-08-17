@@ -79,7 +79,7 @@ install method says otherwise, so the common case is an empty object:
 	"ripgrep": {},
 	"fd": { "apt": "fd-find", "bin": "fdfind" },
 	"xclip": { "brew": null },
-	"eza": { "apt": null, "cargo": "eza@0.18.0" },
+	"eza": { "_": "This is a comment", "apt": null, "cargo": "eza@0.18.0" },
 	"shellcheck": {
 		"release": {
 			"url": "https://github.com/koalaman/shellcheck/releases/download/v{version}/shellcheck-v{version}.{os}.{arch}.tar.xz",
@@ -133,6 +133,8 @@ exists) -> `release` -> `build`. The first available method wins.
 `install` only ever adds things: it installs what's missing and re-installs
 `release` entries whose pinned version moved. It never removes or downgrades.
 
+**Comments** - Comments can be specified per package with a key of an underscore (`_`).
+
 ## Tests
 
 ```sh
@@ -163,6 +165,8 @@ is covered by unit tests only; and `packages install` assumes the system package
 manager's metadata is current - sync.py never runs `apt update` itself.
 
 ## TODO
+
+### Misc
 
 - Implement the `build` install method.
 - Misc scripts to run on sync. Should be idempotent and allow for that last layer of flexibility in the system

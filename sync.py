@@ -172,6 +172,7 @@ def cmd_capture(args):
 # ---------------------------------------------------------------------------
 
 def detect_system_manager(override=None):
+    """Identify what system manager should be used on the current system."""
     if override:
         return override
     if platform.system() == "Darwin":
@@ -239,12 +240,19 @@ def system_pkg_installed(mgr, spec):
 
 
 def package_state(name, entry, method, spec):
-    """One of: installed, outdated (release only), missing."""
+    """Checks the state of the package on the system.
+
+    One of: installed, outdated (release only), missing.
+    """
     if method in SYSTEM_MANAGERS:
+        # For system managers, we use the package managers themselves to know if it's installed
         return "installed" if system_pkg_installed(method, spec) else "missing"
+
+    # For other install methods, we check if the binary of that name exists on the system
     binary = binary_name(name, entry)
+
     if method == "release":
-        # Don't rely on PATH: we know exactly where release binaries land.
+        # Don't rely on PATH. We know exactly where release binaries land.
         if not (LOCAL_BIN / binary).is_file():
             return "missing"
         receipt = load_receipts().get(name)
