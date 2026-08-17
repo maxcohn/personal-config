@@ -31,6 +31,9 @@
 		"apt": "moreutils",
 		"brew": "moreutils"
 	},
+	"neofetch": {
+		"apt": "neofetch"
+	},
 	"nmap": {
 		"apt": "nmap",
 		"brew": "nmap"
