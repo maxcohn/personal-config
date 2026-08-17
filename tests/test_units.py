@@ -4,9 +4,11 @@ Covers logic the CLI can't reach on a given machine -- you can't run pacman or
 brew on a Debian box, but their command construction still has to be right.
 """
 
+import base64
 import io
 import json
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -303,6 +305,274 @@ class TestPackageState(unittest.TestCase):
     def test_bin_override_respected(self):
         (self.bin / "toybin").write_text("")
         self.assertEqual(self.state(entry={"bin": "toybin"}), "installed")
+
+
+class RepoCase(unittest.TestCase):
+    """Relocates the /etc paths so nothing here can reach the real system."""
+
+    SPEC = {"uris": "https://x/packages", "suites": "stable", "components": "main",
+            "key": "keys/toy.asc", "key_url": "https://x/key.gpg"}
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="pc-repo-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.sysroot = self.tmp / "sysroot"
+        self.repo = self.tmp / "repo"
+        (self.repo / "keys").mkdir(parents=True)
+        (self.repo / "keys" / "toy.asc").write_text("KEYBYTES\n")
+        patches = [
+            mock.patch.object(sync, "SYSROOT", self.sysroot),
+            mock.patch.object(sync, "REPO", self.repo),
+            mock.patch.object(sync, "KEYS_DIR", self.repo / "keys"),
+            mock.patch.object(sync, "APT_SOURCES_DIR",
+                              self.sysroot / "etc/apt/sources.list.d"),
+            mock.patch.object(sync, "APT_KEYRINGS_DIR", self.sysroot / "etc/apt/keyrings"),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def capture(self, fn, *args, **kwargs):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            result = fn(*args, **kwargs)
+        return result, buf.getvalue()
+
+
+class TestRenderAptSource(RepoCase):
+    def test_exact_output(self):
+        self.assertEqual(sync.render_apt_source("toy", self.SPEC), """\
+# Managed by personal-config (repo: toy). Local edits are overwritten.
+Types: deb
+URIs: https://x/packages
+Suites: stable
+Components: main
+Signed-By: /etc/apt/keyrings/toy.asc
+""")
+
+    def test_signed_by_ignores_the_sysroot(self):
+        """A file rendered under test must be byte-identical to a real one, or
+        drift detection compares against the wrong thing."""
+        self.assertIn("Signed-By: /etc/apt/keyrings/toy.asc",
+                      sync.render_apt_source("toy", self.SPEC))
+        self.assertNotIn(str(self.sysroot), sync.render_apt_source("toy", self.SPEC))
+
+    def test_types_can_be_overridden(self):
+        spec = dict(self.SPEC, types="deb deb-src")
+        self.assertIn("Types: deb deb-src", sync.render_apt_source("toy", spec))
+
+    def test_architectures_omitted_by_default(self):
+        self.assertNotIn("Architectures", sync.render_apt_source("toy", self.SPEC))
+
+    def test_architectures_literal_passes_through(self):
+        spec = dict(self.SPEC, architectures="amd64 arm64")
+        self.assertIn("Architectures: amd64 arm64", sync.render_apt_source("toy", spec))
+
+    def test_suites_auto_reads_os_release(self):
+        (self.sysroot / "etc").mkdir(parents=True)
+        (self.sysroot / "etc/os-release").write_text('ID=ubuntu\nVERSION_CODENAME="noble"\n')
+        spec = dict(self.SPEC, suites="auto")
+        self.assertIn("Suites: noble", sync.render_apt_source("toy", spec))
+
+    def test_architectures_auto_reads_dpkg(self):
+        spec = dict(self.SPEC, architectures="auto")
+        with mock.patch.object(sync, "dpkg_architecture", lambda: "arm64"):
+            self.assertIn("Architectures: arm64", sync.render_apt_source("toy", spec))
+
+    def test_no_templating_on_values(self):
+        """dnf will need $releasever to survive this path untouched."""
+        spec = dict(self.SPEC, uris="https://x/$releasever/{version}")
+        self.assertIn("URIs: https://x/$releasever/{version}",
+                      sync.render_apt_source("toy", spec))
+
+    def test_newline_in_value_is_rejected(self):
+        spec = dict(self.SPEC, suites="stable\nURIs: https://evil")
+        with self.assertRaises(SystemExit):
+            sync.render_apt_source("toy", spec)
+
+    def test_auto_unsupported_for_other_fields(self):
+        spec = dict(self.SPEC, components="auto")
+        with self.assertRaises(SystemExit):
+            sync.render_apt_source("toy", spec)
+
+
+class TestRepoNaming(RepoCase):
+    def test_name_defaults_to_the_package(self):
+        self.assertEqual(sync.apt_repo_name("github-cli", self.SPEC), "github-cli")
+
+    def test_name_override(self):
+        spec = dict(self.SPEC, name="docker")
+        self.assertEqual(sync.apt_repo_name("docker-ce", spec), "docker")
+
+    def test_keyring_suffix_follows_the_repo_copy(self):
+        self.assertEqual(sync.apt_key_dest("toy", self.SPEC).name, "toy.asc")
+
+    def test_key_must_stay_inside_the_repo(self):
+        for bad in ("../../etc/passwd", "/etc/passwd"):
+            with self.subTest(key=bad):
+                with self.assertRaises(SystemExit):
+                    sync.key_file("toy", dict(self.SPEC, key=bad))
+
+    def test_missing_key_names_the_fetch_command(self):
+        with self.assertRaises(SystemExit) as ctx:
+            sync.key_file("toy", dict(self.SPEC, key="keys/absent.asc"))
+        self.assertIn("fetch-key toy", str(ctx.exception))
+
+
+class TestRepoState(RepoCase):
+    def install(self, dry_run=False):
+        changed, _out = self.capture(sync.install_apt_repo, "toy", self.SPEC, dry_run)
+        return changed
+
+    def test_missing_then_drifted_then_present(self):
+        self.assertEqual(sync.repo_state("toy", self.SPEC), "missing")
+        self.install()
+        self.assertEqual(sync.repo_state("toy", self.SPEC), "present")
+        source = sync.apt_source_dest("toy")
+        source.write_text(source.read_text() + "junk\n")
+        self.assertEqual(sync.repo_state("toy", self.SPEC), "drifted")
+
+    def test_drifted_when_only_the_key_changes(self):
+        self.install()
+        (self.repo / "keys" / "toy.asc").write_text("ROTATED\n")
+        self.assertEqual(sync.repo_state("toy", self.SPEC), "drifted")
+
+    def test_install_is_idempotent(self):
+        self.assertTrue(self.install())
+        self.assertFalse(self.install())
+
+    def test_dry_run_writes_nothing(self):
+        _, out = self.capture(sync.install_apt_repo, "toy", self.SPEC, dry_run=True)
+        self.assertIn("install -m 0644", out)
+        self.assertFalse(self.sysroot.exists())
+
+
+class TestRepoSpecs(RepoCase):
+    def entry(self, **kw):
+        return dict({"apt": "toy", "repo": {"apt": self.SPEC}}, **kw)
+
+    def test_inert_for_another_manager(self):
+        self.assertEqual(sync.repo_specs({"toy": self.entry()}, "pacman"), {})
+
+    def test_inert_when_the_package_comes_from_elsewhere(self):
+        """A tool installed via cargo here must not drag its apt repo along."""
+        entry = {"apt": "toy", "cargo": "toy", "prefer": "cargo",
+                 "repo": {"apt": self.SPEC}}
+        with mock.patch.object(sync.shutil, "which", lambda t: t):
+            self.assertEqual(sync.repo_specs({"toy": entry}, "apt"), {})
+
+    def test_shared_name_collapses(self):
+        spec = dict(self.SPEC, name="shared")
+        packages = {"a": {"apt": "a", "repo": {"apt": spec}},
+                    "b": {"apt": "b", "repo": {"apt": spec}}}
+        self.assertEqual(list(sync.repo_specs(packages, "apt")), ["shared"])
+
+    def test_conflicting_definitions_are_fatal(self):
+        packages = {"a": {"apt": "a", "repo": {"apt": dict(self.SPEC, name="shared")}},
+                    "b": {"apt": "b", "repo": {"apt": dict(self.SPEC, name="shared",
+                                                           suites="beta")}}}
+        with self.assertRaises(SystemExit) as ctx:
+            sync.repo_specs(packages, "apt")
+        self.assertIn("shared", str(ctx.exception))
+
+
+class TestPrivilegedWrite(RepoCase):
+    def commands(self, root=False, real_sysroot=False):
+        stack = [mock.patch.object(sync.os, "geteuid", lambda: 0 if root else 1000)]
+        if real_sysroot:
+            stack.append(mock.patch.object(sync, "SYSROOT", Path("/")))
+        buf = io.StringIO()
+        for p in stack:
+            p.start()
+        try:
+            with redirect_stdout(buf):
+                sync.write_privileged(self.sysroot / "etc/x", b"data", dry_run=True)
+        finally:
+            for p in stack:
+                p.stop()
+        return buf.getvalue()
+
+    def test_test_sysroot_needs_no_sudo(self):
+        out = self.commands()
+        self.assertIn("install -m 0644", out)
+        self.assertNotIn("sudo", out)
+
+    def test_real_sysroot_as_user_uses_sudo(self):
+        self.assertIn("sudo install -m 0644", self.commands(real_sysroot=True))
+
+    def test_root_drops_sudo(self):
+        self.assertNotIn("sudo", self.commands(root=True, real_sysroot=True))
+
+    def test_directory_created_only_when_absent(self):
+        self.assertIn("install -d -m 0755", self.commands())
+        (self.sysroot / "etc").mkdir(parents=True)
+        self.assertNotIn("install -d", self.commands())
+
+    def test_unchanged_content_is_silent(self):
+        dest = self.sysroot / "etc/x"
+        dest.parent.mkdir(parents=True)
+        dest.write_bytes(b"data")
+        changed, out = self.capture(sync.write_privileged, dest, b"data", dry_run=False)
+        self.assertFalse(changed)
+        self.assertEqual(out, "")
+
+
+class TestRefresh(RepoCase):
+    def test_skipped_under_a_test_sysroot(self):
+        """Without this, tier 1 would run a real apt-get update on the machine."""
+        _, out = self.capture(sync.refresh_manager, "apt", dry_run=False)
+        self.assertIn("skipping apt-get update", out)
+
+    def test_uses_apt_get_under_sudo(self):
+        with mock.patch.object(sync, "SYSROOT", Path("/")), \
+             mock.patch.object(sync.os, "geteuid", lambda: 1000):
+            _, out = self.capture(sync.refresh_manager, "apt", dry_run=True)
+        self.assertIn("sudo apt-get update", out)
+
+    def test_unsupported_manager_is_a_no_op(self):
+        _, out = self.capture(sync.refresh_manager, "brew", dry_run=True)
+        self.assertEqual(out, "")
+
+    def test_failure_exits_with_a_repair_hint(self):
+        boom = subprocess.CalledProcessError(1, "apt-get")
+        with mock.patch.object(sync, "SYSROOT", Path("/")), \
+             mock.patch.object(sync, "run_or_print", mock.Mock(side_effect=boom)):
+            with self.assertRaises(SystemExit) as ctx:
+                sync.refresh_manager("apt", dry_run=False)
+        self.assertIn("sources.list.d", str(ctx.exception))
+
+
+class TestEnarmor(unittest.TestCase):
+    """Vendors mostly serve binary keys; armoring keeps the repo reviewable text."""
+
+    KEY = bytes(bytearray([0x99, 0x02, 0x0D, 0x04]) + bytearray(range(256)) * 3)
+
+    def test_round_trips(self):
+        text = sync.enarmor(self.KEY)
+        body = "".join(line for line in text.splitlines()[2:]
+                       if line and not line.startswith(("=", "-")))
+        self.assertEqual(base64.b64decode(body), self.KEY)
+
+    def test_shape(self):
+        text = sync.enarmor(self.KEY)
+        self.assertTrue(text.startswith("-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n"))
+        self.assertTrue(text.endswith("-----END PGP PUBLIC KEY BLOCK-----\n"))
+        lines = text.splitlines()
+        self.assertTrue(all(len(line) <= 64 for line in lines[2:-2]))
+        self.assertRegex(lines[-2], r"^=[A-Za-z0-9+/]{4}$")
+
+    def test_known_crc24_vector(self):
+        """gpg --enarmor of an empty body; guards the CRC24 loop."""
+        self.assertIn("=twTO", sync.enarmor(b""))
+
+    def test_matches_the_committed_github_key(self):
+        path = Path(sync.REPO) / "keys" / "github-cli.asc"
+        if not path.is_file():
+            self.skipTest("keys/github-cli.asc not present")
+        text = path.read_text()
+        body = "".join(line for line in text.splitlines()[2:]
+                       if line and not line.startswith(("=", "-")))
+        self.assertEqual(sync.enarmor(base64.b64decode(body)), text)
 
 
 if __name__ == "__main__":

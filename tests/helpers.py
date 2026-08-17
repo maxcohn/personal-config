@@ -30,6 +30,8 @@ class Sandbox(unittest.TestCase):
         self.repo = self.tmp / "repo"
         self.modules = self.repo / "modules"
         self.home = self.tmp / "home"
+        # Deliberately not created: ensure_dir has to build it.
+        self.sysroot = self.tmp / "sysroot"
         self.modules.mkdir(parents=True)
         self.home.mkdir()
         shutil.copy2(SYNC_PY, self.repo / "sync.py")
@@ -61,6 +63,19 @@ class Sandbox(unittest.TestCase):
     def packages(self, data):
         self.write(self.repo / "packages.json", json.dumps(data))
 
+    def key(self, name, body="test key\n"):
+        """Write a fake armored signing key into the sandbox repo's keys/."""
+        armor = ("-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n" + body
+                 + "-----END PGP PUBLIC KEY BLOCK-----\n")
+        self.write(self.repo / "keys" / (name + ".asc"), armor)
+        return "keys/{}.asc".format(name)
+
+    def apt_source(self, name):
+        return self.sysroot / "etc/apt/sources.list.d" / (name + ".sources")
+
+    def apt_keyring(self, name):
+        return self.sysroot / "etc/apt/keyrings" / (name + ".asc")
+
     # -- running sync.py ----------------------------------------------------
 
     def sync(self, *args, home=None, path=None, expect=None):
@@ -68,6 +83,8 @@ class Sandbox(unittest.TestCase):
         env = dict(os.environ)
         env["HOME"] = str(home or self.home)
         env["PATH"] = path if path is not None else env.get("PATH", "")
+        # Keeps /etc writes -- and the apt-get update that follows them -- in the sandbox.
+        env["PERSONAL_CONFIG_SYSROOT"] = str(self.sysroot)
         proc = subprocess.run(
             [sys.executable, str(self.repo / "sync.py"), *args],
             capture_output=True, text=True, env=env, cwd=str(self.repo))

@@ -162,5 +162,94 @@ class TestPackagesJson(unittest.TestCase):
                 self.assertTrue(usable, "no method can ever install this")
 
 
+class TestRepoBlocks(unittest.TestCase):
+    """Third-party repos install a root-level signing key, so the data is checked
+    hard here rather than discovered on a machine."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.packages = json.loads((REPO_ROOT / "packages.json").read_text())
+
+    def apt_blocks(self):
+        for name, entry in self.packages.items():
+            spec = (entry.get("repo") or {}).get("apt")
+            if spec is not None:
+                yield name, entry, spec
+
+    def test_repo_is_keyed_by_a_known_manager(self):
+        for name, entry in self.packages.items():
+            block = entry.get("repo")
+            if block is None:
+                continue
+            with self.subTest(package=name):
+                self.assertIsInstance(block, dict)
+                for mgr in block:
+                    self.assertIn(mgr, sync.SYSTEM_MANAGERS, "unknown manager -- typo?")
+
+    def test_apt_blocks_are_complete(self):
+        allowed = set(sync.APT_REQUIRED) | {"types", "architectures", "name"}
+        for name, _entry, spec in self.apt_blocks():
+            with self.subTest(package=name):
+                for field in sync.APT_REQUIRED:
+                    self.assertIn(field, spec)
+                self.assertFalse(set(spec) - allowed, "unknown field(s) -- typo?")
+
+    def test_urls_are_https(self):
+        for name, _entry, spec in self.apt_blocks():
+            with self.subTest(package=name):
+                self.assertTrue(spec["uris"].startswith("https://"))
+                self.assertTrue(spec["key_url"].startswith("https://"))
+
+    def test_repo_implies_the_manager_names_a_package(self):
+        """A repo with nothing to install from it is dead weight."""
+        for name, entry, _spec in self.apt_blocks():
+            with self.subTest(package=name):
+                self.assertIsInstance(entry.get("apt"), str)
+
+    def test_key_files_exist_and_are_armored(self):
+        for name, _entry, spec in self.apt_blocks():
+            with self.subTest(package=name):
+                path = REPO_ROOT / spec["key"]
+                self.assertTrue(path.is_file(), "run: ./sync.py repos fetch-key " + name)
+                self.assertEqual(path.parent, REPO_ROOT / "keys")
+                text = path.read_text()
+                self.assertTrue(text.startswith("-----BEGIN PGP PUBLIC KEY BLOCK-----\n"))
+                self.assertTrue(text.endswith("-----END PGP PUBLIC KEY BLOCK-----\n"))
+                self.assertNotIn("\r", text, "CRLF would drift forever")
+
+    def test_key_armor_is_intact(self):
+        """Re-armoring the decoded body must reproduce the file, so a truncated
+        paste or a bad CRC is caught here and not by apt on a fresh machine."""
+        import base64
+        for name, _entry, spec in self.apt_blocks():
+            with self.subTest(package=name):
+                text = (REPO_ROOT / spec["key"]).read_text()
+                body = "".join(line for line in text.splitlines()[2:]
+                               if line and not line.startswith(("=", "-")))
+                self.assertEqual(sync.enarmor(base64.b64decode(body)), text)
+
+    def test_no_orphan_keys(self):
+        keys_dir = REPO_ROOT / "keys"
+        if not keys_dir.is_dir():
+            return
+        referenced = {(REPO_ROOT / spec["key"]).resolve()
+                      for _n, _e, spec in self.apt_blocks()}
+        for path in keys_dir.iterdir():
+            if path.is_file():
+                with self.subTest(key=path.name):
+                    self.assertIn(path.resolve(), referenced, "key is unreferenced")
+
+    def test_specs_render_without_error(self):
+        for name, _entry, spec in self.apt_blocks():
+            with self.subTest(package=name):
+                rendered = sync.render_apt_source(sync.apt_repo_name(name, spec), spec)
+                self.assertIn("Signed-By: /etc/apt/keyrings/", rendered)
+                self.assertTrue(rendered.endswith("\n"))
+
+    def test_no_conflicting_repo_definitions(self):
+        """Two entries may share a repo name only if they render identically."""
+        sync.repo_specs(self.packages, "apt")
+
+
 if __name__ == "__main__":
     unittest.main()

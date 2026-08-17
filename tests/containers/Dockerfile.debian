@@ -1,4 +1,4 @@
 # Package lists are deliberately kept: a real machine has them, and `packages
-# install` needs them (sync.py does not run `apt update` itself).
+# install` needs them (sync.py refreshes only after changing a repository).
 FROM docker.io/library/debian:stable-slim
 RUN apt-get update && apt-get install -y --no-install-recommends python3 ca-certificates

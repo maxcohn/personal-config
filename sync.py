@@ -6,12 +6,15 @@
     ./sync.py deploy   [module...] [--dry-run] copy repo -> system
     ./sync.py capture  [module...] [--dry-run] copy system -> repo (tracked files only)
     ./sync.py packages status|install [--dry-run] [--manager NAME]
+    ./sync.py repos    status|install [--dry-run] [--manager NAME]
+    ./sync.py repos    fetch-key <package>...    download a pinned signing key
 
 Stdlib only; targets Python 3.8+. See README.md for the manifest and
 packages.json schemas.
 """
 
 import argparse
+import base64
 import difflib
 import fnmatch
 import json
@@ -31,12 +34,19 @@ REPO = Path(__file__).resolve().parent
 HOME = Path.home()
 MODULES_DIR = REPO / "modules"
 PACKAGES_FILE = REPO / "packages.json"
+KEYS_DIR = REPO / "keys"
 RECEIPTS_FILE = HOME / ".local" / "state" / "personal-config" / "installed.json"
 LOCAL_BIN = HOME / ".local" / "bin"
 
+# The system being configured. Always "/" in real use; the tests point it at a
+# temp tree so nothing can reach the real /etc.
+SYSROOT = Path(os.environ.get("PERSONAL_CONFIG_SYSROOT", "/"))
+APT_SOURCES_DIR = SYSROOT / "etc/apt/sources.list.d"
+APT_KEYRINGS_DIR = SYSROOT / "etc/apt/keyrings"
+
 SYSTEM_MANAGERS = ["apt", "pacman", "dnf", "brew"]
 LANG_INSTALLERS = ["cargo", "go", "uv"]
-NON_METHOD_KEYS = {"prefer", "bin", "_"}  # "_" is a per-package comment
+NON_METHOD_KEYS = {"prefer", "bin", "_", "repo"}  # "_" is a per-package comment
 
 DEFAULT_OS_MAP = {"linux": "linux", "darwin": "darwin"}
 DEFAULT_ARCH_MAP = {"x86_64": "x86_64", "amd64": "x86_64", "arm64": "aarch64", "aarch64": "aarch64"}
@@ -383,6 +393,11 @@ def cmd_packages(args):
         print("warning: {} is not on PATH; release-installed tools won't be runnable"
               .format(LOCAL_BIN))
 
+    # Some packages only exist behind a third-party repo, so those come first.
+    repos = repo_specs(packages, sysmgr)
+    if args.action == "install":
+        install_repos(repos, sysmgr, args.dry_run)
+
     resolved = {}  # name -> (method, spec, state)
     for name, entry in packages.items():
         candidates = resolve(entry, sysmgr)
@@ -400,6 +415,9 @@ def cmd_packages(args):
             via = "" if method is None else "  (via {}: {})".format(
                 method, spec if isinstance(spec, str) else spec.get("version", "?"))
             print("  {:<16} {}{}".format(name, state, via))
+        pending = sorted(n for n, (p, s) in repos.items() if repo_state(p, s) != "present")
+        if pending:
+            print("note: third-party repositories not yet added: {}".format(", ".join(pending)))
         return 0
 
     # install
@@ -426,6 +444,295 @@ def cmd_packages(args):
 
 
 # ---------------------------------------------------------------------------
+# Third-party repositories
+# ---------------------------------------------------------------------------
+
+REPO_MANAGERS = ["apt"]
+# apt(8) warns it has no stable CLI when its output isn't a terminal; apt-get does not.
+REFRESH_CMDS = {"apt": ["apt-get", "update"]}
+
+APT_REQUIRED = ("uris", "suites", "components", "key", "key_url")
+APT_FIELDS = [("types", "Types"), ("uris", "URIs"), ("suites", "Suites"),
+              ("components", "Components"), ("architectures", "Architectures")]
+
+
+def os_release_codename():
+    path = SYSROOT / "etc/os-release"
+    try:
+        text = path.read_text()
+    except OSError:
+        sys.exit("repo: suites \"auto\" needs {}".format(path))
+    for line in text.splitlines():
+        if line.startswith("VERSION_CODENAME="):
+            return line.split("=", 1)[1].strip().strip('"')
+    sys.exit("repo: no VERSION_CODENAME in {}".format(path))
+
+
+def dpkg_architecture():
+    proc = subprocess.run(["dpkg", "--print-architecture"],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    arch = proc.stdout.decode().strip()
+    if proc.returncode != 0 or not arch:
+        sys.exit("repo: architectures \"auto\" needs a working dpkg")
+    return arch
+
+
+def resolve_field(field, value):
+    """Field values are written through verbatim apart from the "auto" keyword."""
+    if value != "auto":
+        return value
+    if field == "suites":
+        return os_release_codename()
+    if field == "architectures":
+        return dpkg_architecture()
+    sys.exit("repo: \"auto\" is not supported for {}".format(field))
+
+
+def system_path(path):
+    """The path as the configured system sees it, with any test sysroot stripped."""
+    return "/" + Path(path).relative_to(SYSROOT).as_posix()
+
+
+def apt_repo_name(pkg_name, spec):
+    return spec.get("name", pkg_name)
+
+
+def apt_source_dest(name):
+    return APT_SOURCES_DIR / (name + ".sources")
+
+
+def apt_key_dest(name, spec):
+    return APT_KEYRINGS_DIR / (name + Path(spec["key"]).suffix)
+
+
+def key_file(pkg_name, spec):
+    rel = Path(spec["key"])
+    if rel.is_absolute() or ".." in rel.parts:
+        sys.exit("{}: key must be a path inside the repo: {}".format(pkg_name, spec["key"]))
+    path = REPO / rel
+    if not path.is_file():
+        sys.exit("{}: key file not found: {}\n  fetch it with: ./sync.py repos fetch-key {}"
+                 .format(pkg_name, path, pkg_name))
+    return path
+
+
+def render_apt_source(name, spec):
+    """A deb822 .sources file. Byte-deterministic: drift detection compares bytes."""
+    lines = ["# Managed by personal-config (repo: {}). Local edits are overwritten."
+             .format(name)]
+    for field, header in APT_FIELDS:
+        value = spec.get(field, "deb" if field == "types" else None)
+        if value is None:
+            continue
+        value = resolve_field(field, value)
+        if "\n" in value or not value.strip():
+            sys.exit("repo {}: bad value for {}: {!r}".format(name, field, value))
+        lines.append("{}: {}".format(header, value))
+    lines.append("Signed-By: {}".format(system_path(apt_key_dest(name, spec))))
+    return "\n".join(lines) + "\n"
+
+
+def repo_state(pkg_name, spec):
+    """present / drifted / missing. Both paths are world-readable, so no sudo."""
+    name = apt_repo_name(pkg_name, spec)
+    source = apt_source_dest(name)
+    key_dest = apt_key_dest(name, spec)
+    if not source.is_file() or not key_dest.is_file():
+        return "missing"
+    if source.read_bytes() != render_apt_source(name, spec).encode():
+        return "drifted"
+    if key_dest.read_bytes() != key_file(pkg_name, spec).read_bytes():
+        return "drifted"
+    return "present"
+
+
+def privileged_prefix():
+    """No sudo when we're root, or when writing into a test sysroot we own."""
+    return [] if SYSROOT != Path("/") else sudo_prefix()
+
+
+def write_privileged(dest, content, dry_run, mode="0644"):
+    """Install bytes at a root-owned path; True if anything changed.
+
+    Nothing in the stdlib can write a file we don't own, so stage it somewhere we
+    can and hand it to install(1) under sudo, which lands it owned by root.
+    """
+    if isinstance(content, str):
+        content = content.encode()
+    if dest.is_file() and dest.read_bytes() == content:
+        return False
+    sudo = privileged_prefix()
+    if not dest.parent.is_dir():
+        run_or_print(sudo + ["install", "-d", "-m", "0755", str(dest.parent)], dry_run)
+    print("  write {} ({} bytes)".format(dest, len(content)))
+    if dry_run:
+        print("  $ {}".format(" ".join(sudo + ["install", "-m", mode, "<staged>", str(dest)])))
+        return True
+    with tempfile.TemporaryDirectory() as tmp:
+        staged = Path(tmp) / dest.name
+        staged.write_bytes(content)
+        run_or_print(sudo + ["install", "-m", mode, str(staged), str(dest)], dry_run)
+    return True
+
+
+def install_apt_repo(pkg_name, spec, dry_run):
+    """Key first, so a source file never points at a keyring that isn't there."""
+    name = apt_repo_name(pkg_name, spec)
+    source = apt_source_dest(name)
+    legacy = source.with_suffix(".list")
+    if legacy.exists():
+        print("  warning: {} also exists; apt will report a duplicate source".format(legacy))
+    changed = write_privileged(apt_key_dest(name, spec),
+                               key_file(pkg_name, spec).read_bytes(), dry_run)
+    changed |= write_privileged(source, render_apt_source(name, spec), dry_run)
+    return changed
+
+
+def refresh_manager(mgr, dry_run):
+    """Only ever called right after a repository actually changed."""
+    cmd = REFRESH_CMDS.get(mgr)
+    if cmd is None:
+        return
+    if SYSROOT != Path("/"):
+        print("  (PERSONAL_CONFIG_SYSROOT set: skipping {})".format(" ".join(cmd)))
+        return
+    try:
+        run_or_print(privileged_prefix() + cmd, dry_run)
+    except subprocess.CalledProcessError:
+        sys.exit("{} failed after changing repositories -- fix or remove the new files"
+                 " under {} and re-run".format(" ".join(cmd), APT_SOURCES_DIR))
+
+
+def repo_specs(packages, sysmgr):
+    """{repo name: (package name, spec)} for repos this machine should carry.
+
+    Gated on the package actually resolving to this manager, so a tool that comes
+    from cargo here doesn't drag its apt repo along.
+    """
+    if sysmgr not in REPO_MANAGERS:
+        return {}
+    out = {}
+    for pkg_name, entry in packages.items():
+        spec = (entry.get("repo") or {}).get(sysmgr)
+        if spec is None:
+            continue
+        candidates = resolve(entry, sysmgr)
+        if not candidates or candidates[0][0] != sysmgr:
+            continue
+        name = apt_repo_name(pkg_name, spec)
+        if name in out:
+            other, other_spec = out[name]
+            if render_apt_source(name, other_spec) != render_apt_source(name, spec):
+                sys.exit("{} and {} both define repo {!r}, with different contents"
+                         .format(other, pkg_name, name))
+            continue
+        out[name] = (pkg_name, spec)
+    return out
+
+
+def install_repos(specs, sysmgr, dry_run):
+    changed = False
+    for name, (pkg_name, spec) in sorted(specs.items()):
+        state = repo_state(pkg_name, spec)
+        if state == "present":
+            continue
+        print("{}: {}".format(name, state))
+        changed |= install_apt_repo(pkg_name, spec, dry_run)
+    if changed:
+        refresh_manager(sysmgr, dry_run)
+    return changed
+
+
+def enarmor(data):
+    """Binary OpenPGP key -> ASCII armor, matching gpg's base64 body and CRC24.
+
+    Most vendors serve a binary .gpg. Armoring on the way in keeps everything
+    committed to this repo reviewable text.
+    """
+    crc = 0xB704CE
+    for byte in bytearray(data):
+        crc ^= byte << 16
+        for _ in range(8):
+            crc <<= 1
+            if crc & 0x1000000:
+                crc ^= 0x1864CFB
+    body = base64.b64encode(data).decode()
+    lines = [body[i:i + 64] for i in range(0, len(body), 64)]
+    checksum = base64.b64encode((crc & 0xFFFFFF).to_bytes(3, "big")).decode()
+    return ("-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n" + "\n".join(lines)
+            + "\n=" + checksum + "\n-----END PGP PUBLIC KEY BLOCK-----\n")
+
+
+def fetch_keys(packages, names):
+    """Download a pinned key_url into keys/ for review and commit.
+
+    Deliberately separate from install: nothing is ever fetched at install time.
+    """
+    if not names:
+        sys.exit("repos fetch-key: name at least one package")
+    KEYS_DIR.mkdir(parents=True, exist_ok=True)
+    for pkg_name in names:
+        entry = packages.get(pkg_name)
+        if entry is None:
+            sys.exit("unknown package: {}".format(pkg_name))
+        spec = (entry.get("repo") or {}).get("apt")
+        url = (spec or {}).get("key_url")
+        if not url:
+            sys.exit("{}: no repo.apt.key_url to fetch".format(pkg_name))
+        if not url.startswith("https://"):
+            sys.exit("{}: key_url must be https: {}".format(pkg_name, url))
+        print("{}: fetch {}".format(pkg_name, url))
+        with urllib.request.urlopen(url) as resp:
+            data = resp.read()
+        if data.lstrip().startswith(b"-----BEGIN PGP"):
+            text = data.decode()
+        elif data and bytearray(data)[0] & 0x80:
+            text = enarmor(data)
+        else:
+            sys.exit("  that URL did not serve an OpenPGP key ({} bytes)".format(len(data)))
+        dest = KEYS_DIR / "{}.asc".format(apt_repo_name(pkg_name, spec))
+        rel = dest.relative_to(REPO).as_posix()
+        if dest.is_file():
+            print("  replacing {} -- git diff shows what changed".format(rel))
+        dest.write_text(text)
+        print("  wrote {} ({} bytes)".format(rel, len(data)))
+        if spec.get("key") != rel:
+            print("  note: set \"key\": \"{}\" in packages.json".format(rel))
+    return 0
+
+
+def cmd_repos(args):
+    packages = load_packages()
+    if args.action == "fetch-key":
+        return fetch_keys(packages, args.packages)
+
+    sysmgr = detect_system_manager(args.manager)
+    print("system package manager: {}".format(sysmgr or "none detected"))
+    if sysmgr and sysmgr not in REPO_MANAGERS:
+        waiting = [n for n, e in packages.items() if (e.get("repo") or {}).get(sysmgr)]
+        print("  third-party repositories are not implemented for {}{}".format(
+            sysmgr, " ({})".format(", ".join(waiting)) if waiting else ""))
+        return 0
+
+    specs = repo_specs(packages, sysmgr)
+    if not specs:
+        print("  no third-party repositories apply here")
+        return 0
+
+    if args.action == "status":
+        drift = False
+        for name, (pkg_name, spec) in sorted(specs.items()):
+            state = repo_state(pkg_name, spec)
+            drift = drift or state != "present"
+            print("  {:<20} {:<9} ({})".format(name, state, apt_source_dest(name)))
+        return 1 if drift else 0
+
+    if not install_repos(specs, sysmgr, args.dry_run):
+        print("  all repositories present")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -447,6 +754,13 @@ def main():
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--manager", help="override detected system package manager")
     p.set_defaults(fn=cmd_packages)
+
+    p = sub.add_parser("repos")
+    p.add_argument("action", choices=["status", "install", "fetch-key"])
+    p.add_argument("packages", nargs="*", help="package names (fetch-key only)")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--manager", help="override detected system package manager")
+    p.set_defaults(fn=cmd_repos)
 
     args = parser.parse_args()
     sys.exit(args.fn(args))

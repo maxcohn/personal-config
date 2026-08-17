@@ -17,7 +17,18 @@
 		"brew": null
 	},
 	"github-cli": {
-		"brew": "gh"
+		"_": "Distro packages of gh lag badly, so this comes from GitHub's own repo.",
+		"apt": "gh",
+		"brew": "gh",
+		"repo": {
+			"apt": {
+				"uris": "https://cli.github.com/packages",
+				"suites": "stable",
+				"components": "main",
+				"key": "keys/github-cli.asc",
+				"key_url": "https://cli.github.com/packages/githubcli-archive-keyring.gpg"
+			}
+		}
 	},
 	"jq": {
 		"brew": "jq"

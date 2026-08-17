@@ -126,6 +126,12 @@ class ContainerCase(unittest.TestCase):
         self.assertIn("DRIFT_OK", proc.stdout)
         self.assertIn("modified", proc.stdout)
 
+    def test_repos_status_never_crashes(self):
+        """Exit code varies with what this distro needs; a traceback never does."""
+        proc = self.run_in("python3 sync.py repos status || true; echo REPOS_OK")
+        self.assertIn("REPOS_OK", proc.stdout)
+        self.assertNotIn("Traceback", proc.stderr)
+
 
 class ManagedDistroCase(ContainerCase):
     """Distros with a supported package manager."""
@@ -224,7 +230,71 @@ EOF
 
 
 class TestDebian(ManagedDistroCase):
+    """apt is the only manager with third-party repo support, so those tests live
+    here. PERSONAL_CONFIG_SYSROOT is left unset: this writes the container's real
+    /etc, as root with no sudo, which is the only place that path gets exercised.
+    """
+
     distro = "debian"
+
+    def test_repo_added_and_package_comes_from_it(self):
+        proc = self.run_in("""
+            python3 sync.py repos install
+            grep -q 'Signed-By: /etc/apt/keyrings/github-cli.asc' \
+                /etc/apt/sources.list.d/github-cli.sources || { echo BAD_SOURCE; exit 1; }
+            [ "$(stat -c '%U %a' /etc/apt/keyrings/github-cli.asc)" = "root 644" ] \
+                || { echo BAD_MODE; exit 1; }
+            python3 sync.py repos status || { echo NOT_PRESENT; exit 1; }
+            apt-cache policy gh | grep -q cli.github.com || { echo WRONG_ORIGIN; exit 1; }
+            echo REPO_OK
+        """)
+        self.assertIn("REPO_OK", proc.stdout)
+        self.assertIn("apt-get update", proc.stdout)
+        self.assertNotIn("sudo", proc.stdout)
+
+    def test_repo_install_is_idempotent(self):
+        proc = self.run_in("""
+            python3 sync.py repos install > /dev/null
+            before=$(stat -c %Y /etc/apt/sources.list.d/github-cli.sources)
+            python3 sync.py repos install > second.log
+            after=$(stat -c %Y /etc/apt/sources.list.d/github-cli.sources)
+            [ "$before" = "$after" ] || { echo REWRITTEN; exit 1; }
+            grep -q 'apt-get update' second.log && { echo REFRESHED_AGAIN; exit 1; }
+            grep -q 'all repositories present' second.log || { echo NOT_REPORTED; exit 1; }
+            echo IDEMPOTENT_OK
+        """)
+        self.assertIn("IDEMPOTENT_OK", proc.stdout)
+
+    def test_repo_drift_is_rewritten(self):
+        proc = self.run_in("""
+            python3 sync.py repos install > /dev/null
+            echo 'URIs: https://evil' >> /etc/apt/sources.list.d/github-cli.sources
+            python3 sync.py repos status && { echo DRIFT_NOT_DETECTED; exit 1; }
+            python3 sync.py repos install > /dev/null
+            grep -q evil /etc/apt/sources.list.d/github-cli.sources && { echo STILL_DIRTY; exit 1; }
+            python3 sync.py repos status || { echo NOT_REPAIRED; exit 1; }
+            echo DRIFT_OK
+        """)
+        self.assertIn("DRIFT_OK", proc.stdout)
+
+    def test_packages_install_pulls_gh_from_the_third_party_repo(self):
+        """Debian ships its own gh, so 'it installed' proves nothing on its own --
+        the installed version has to be the one from cli.github.com."""
+        proc = self.run_in("""
+            python3 -c "
+import json, pathlib
+p = pathlib.Path('/repo/packages.json')
+data = json.loads(p.read_text())
+p.write_text(json.dumps({'github-cli': data['github-cli']}))
+"
+            python3 sync.py packages install
+            gh --version >/dev/null || { echo GH_ABSENT; exit 1; }
+            installed=$(dpkg-query -W -f='${Version}' gh)
+            apt-cache madison gh | grep cli.github.com | grep -q "$installed" \
+                || { echo WRONG_ORIGIN; exit 1; }
+            echo GH_OK
+        """)
+        self.assertIn("GH_OK", proc.stdout)
 
 
 class TestArch(ManagedDistroCase):

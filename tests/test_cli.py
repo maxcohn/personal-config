@@ -325,5 +325,145 @@ class TestReleaseInstall(Sandbox):
         self.assertTrue((self.home / ".local/bin/toytool").is_file())
 
 
+class TestRepos(Sandbox):
+    """Everything lands in the sandbox sysroot, so the real /etc is never touched
+    and the apt-get update that follows a change never runs."""
+
+    def setUp(self):
+        super().setUp()
+        self.module("shell", "~/", {".shrc": "x\n"})
+        self.key_path = self.key("toy")
+        self.spec = {"uris": "https://x/packages", "suites": "stable",
+                     "components": "main", "key": self.key_path,
+                     "key_url": "https://x/key.gpg"}
+        self.packages({"toy": {"apt": "toy-pkg", "repo": {"apt": self.spec}}})
+
+    def repos(self, *args, **kw):
+        return self.sync("repos", *args, "--manager", "apt", **kw)
+
+    def test_status_reports_missing_then_present(self):
+        proc = self.repos("status", expect=1)
+        self.assertIn("missing", proc.stdout)
+        self.repos("install", expect=0)
+        proc = self.repos("status", expect=0)
+        self.assertIn("present", proc.stdout)
+
+    def test_install_writes_source_and_keyring(self):
+        self.repos("install", expect=0)
+        source = self.apt_source("toy")
+        self.assertEqual(source.read_text(), """\
+# Managed by personal-config (repo: toy). Local edits are overwritten.
+Types: deb
+URIs: https://x/packages
+Suites: stable
+Components: main
+Signed-By: /etc/apt/keyrings/toy.asc
+""")
+        keyring = self.apt_keyring("toy")
+        self.assertEqual(keyring.read_bytes(), (self.repo / self.key_path).read_bytes())
+        self.assertEqual(stat.S_IMODE(keyring.stat().st_mode), 0o644)
+        self.assertEqual(stat.S_IMODE(source.stat().st_mode), 0o644)
+
+    def test_install_is_idempotent(self):
+        self.repos("install", expect=0)
+        before = self.snapshot(self.sysroot)
+        proc = self.repos("install", expect=0)
+        self.assertIn("all repositories present", proc.stdout)
+        self.assertNotIn("install -m", proc.stdout)
+        self.assertNotIn("apt-get update", proc.stdout)
+        self.assertUnchanged(before, self.sysroot)
+
+    def test_refresh_announced_once_on_change(self):
+        proc = self.repos("install", expect=0)
+        self.assertEqual(proc.stdout.count("skipping apt-get update"), 1)
+
+    def test_drift_reported_and_repaired(self):
+        self.repos("install", expect=0)
+        source = self.apt_source("toy")
+        source.write_text(source.read_text() + "URIs: https://evil\n")
+        proc = self.repos("status", expect=1)
+        self.assertIn("drifted", proc.stdout)
+        self.repos("install", expect=0)
+        self.assertNotIn("evil", source.read_text())
+
+    def test_rotated_key_is_redeployed(self):
+        self.repos("install", expect=0)
+        self.key("toy", body="ROTATED\n")
+        self.assertIn("drifted", self.repos("status", expect=1).stdout)
+        self.repos("install", expect=0)
+        self.assertIn("ROTATED", self.apt_keyring("toy").read_text())
+
+    def test_dry_run_writes_nothing(self):
+        proc = self.repos("install", "--dry-run", expect=0)
+        self.assertIn("install -m 0644", proc.stdout)
+        self.assertFalse(self.sysroot.exists())
+
+    def test_missing_key_errors_without_writing(self):
+        (self.repo / self.key_path).unlink()
+        proc = self.repos("install", expect=1)
+        self.assertIn("key file not found", proc.stderr)
+        self.assertIn("fetch-key toy", proc.stderr)
+        self.assertFalse(self.sysroot.exists())
+
+    def test_unsupported_manager_writes_nothing(self):
+        proc = self.sync("repos", "status", "--manager", "pacman", expect=0)
+        self.assertIn("not implemented for pacman", proc.stdout)
+        self.assertFalse(self.sysroot.exists())
+
+    def test_repo_for_another_manager_is_inert(self):
+        self.packages({"toy": {"pacman": "toy", "repo": {"pacman": {}}}})
+        proc = self.repos("status", expect=0)
+        self.assertIn("no third-party repositories apply", proc.stdout)
+
+    def test_repo_ignored_when_package_comes_from_elsewhere(self):
+        self.packages({"toy": {"apt": "toy-pkg", "release": {"url": "https://x/{version}",
+                                                             "version": "1", "bin": "toy"},
+                               "prefer": "release", "repo": {"apt": self.spec}}})
+        proc = self.repos("status", expect=0)
+        self.assertIn("no third-party repositories apply", proc.stdout)
+
+    def test_shared_name_writes_one_source(self):
+        spec = dict(self.spec, name="shared")
+        self.packages({"a": {"apt": "a", "repo": {"apt": spec}},
+                       "b": {"apt": "b", "repo": {"apt": spec}}})
+        self.repos("install", expect=0)
+        sources = list((self.sysroot / "etc/apt/sources.list.d").iterdir())
+        self.assertEqual([p.name for p in sources], ["shared.sources"])
+
+    def test_conflicting_definitions_error_without_writing(self):
+        self.packages({"a": {"apt": "a", "repo": {"apt": dict(self.spec, name="shared")}},
+                       "b": {"apt": "b", "repo": {"apt": dict(self.spec, name="shared",
+                                                              suites="beta")}}})
+        proc = self.repos("install", expect=1)
+        self.assertIn("shared", proc.stderr)
+        self.assertFalse(self.sysroot.exists())
+
+    def test_packages_install_adds_the_repo_before_installing(self):
+        """A package behind a third-party repo can't install until it exists."""
+        proc = self.sync("packages", "install", "--dry-run", "--manager", "apt", expect=0)
+        out = proc.stdout
+        self.assertLess(out.index("install -m 0644"), out.index("skipping apt-get update"))
+        self.assertLess(out.index("skipping apt-get update"),
+                        out.index("apt install -y toy-pkg"))
+
+    def test_packages_status_notes_pending_repos(self):
+        proc = self.sync("packages", "status", "--manager", "apt", expect=0)
+        self.assertIn("repositories not yet added: toy", proc.stdout)
+
+    def test_fetch_key_rejects_plain_http(self):
+        self.packages({"toy": {"apt": "toy-pkg",
+                               "repo": {"apt": dict(self.spec, key_url="http://x/k.gpg")}}})
+        proc = self.sync("repos", "fetch-key", "toy", expect=1)
+        self.assertIn("must be https", proc.stderr)
+
+    def test_fetch_key_unknown_package(self):
+        proc = self.sync("repos", "fetch-key", "nosuch", expect=1)
+        self.assertIn("unknown package", proc.stderr)
+
+    def test_fetch_key_needs_a_name(self):
+        proc = self.sync("repos", "fetch-key", expect=1)
+        self.assertIn("name at least one package", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -15,18 +15,22 @@ Configs are copied onto the machine and get synced on demand.
 
 ./sync.py packages status  [--manager NAME]
 ./sync.py packages install [--dry-run] [--manager NAME]
+
+./sync.py repos status     [--manager NAME]
+./sync.py repos install    [--dry-run] [--manager NAME]
+./sync.py repos fetch-key  <package>...
 ```
 
 With no module arguments, every module is used. `status` exits non-zero when
-anything has drifted, so it works in a prompt or a cron check.
+anything has drifted, so it works in a prompt or a cron check. `repos status`
+follows the same rule.
 
 Python 3.8+, standard library only - nothing to install before bootstrapping a
 new machine.
 
 ## Modules
 
-Config lives under `modules/`, one directory per module, keeping the repo root
-for higher-level things (the tooling, the tests, `packages.json`).
+Config lives under `modules/`, one directory per module.
 
 ```
 modules/
@@ -139,6 +143,73 @@ exists) -> `release` -> `build`. The first available method wins.
 
 **Comments** - Comments can be specified per package with a key of an underscore (`_`).
 
+### Third-party repositories
+
+Some tools only exist in a vendor's own repository, or ship there far newer than
+the distro's copy. A `repo` block, keyed by manager, declares that repository
+alongside the package that needs it:
+
+```json
+"github-cli": {
+	"apt": "gh",
+	"brew": "gh",
+	"repo": {
+		"apt": {
+			"uris": "https://cli.github.com/packages",
+			"suites": "stable",
+			"components": "main",
+			"key": "keys/github-cli.asc",
+			"key_url": "https://cli.github.com/packages/githubcli-archive-keyring.gpg"
+		}
+	}
+}
+```
+
+Only `apt` is implemented. The block renders to a deb822
+`/etc/apt/sources.list.d/<name>.sources`.
+
+| Field | Meaning |
+| --- | --- |
+| `uris`, `suites`, `components` | Required. The deb822 fields of the same name |
+| `key` | Repo-relative path to the vendored signing key. Installed to `/etc/apt/keyrings/` and named in `Signed-By` |
+| `key_url` | Where the key came from. Read by `fetch-key`, **never** at install time |
+| `types` | Defaults to `deb` |
+| `architectures` | Omitted by default, which lets apt use its own architecture list. Set it only for a repo that genuinely publishes one arch |
+| `name` | Source-file stem, defaulting to the package key. Two packages sharing a `name` collapse onto one source file |
+
+Values are written through **verbatim** - there is no templating. The one
+exception is the keyword `"auto"`, accepted by `suites` (resolved from
+`VERSION_CODENAME` in `/etc/os-release`) and `architectures` (from `dpkg
+--print-architecture`), for the many repositories keyed to the release codename.
+
+A repository is only added when the package would actually be installed from
+that manager here, so a tool that comes from `cargo` on this machine doesn't drag
+its apt repository along, and the whole block is inert on macOS.
+
+`repos install` writes only what is missing or has drifted, and runs `apt-get
+update` **once, only when something actually changed**. It rewrites a file that
+was edited by hand, but never removes a repository you stopped declaring.
+
+### Signing keys (`keys/`)
+
+Keys are **committed to this repo, ASCII-armored**, and never fetched at install
+time. Installing a vendor's signing key hands them root on the machine, so the
+exact bytes being trusted should be reviewable in `git log` and the decision made
+once, deliberately, rather than re-taken from a URL on every machine. It also
+means `repos status` can report a rotated key as drift, and that a fresh machine
+needs no network to lay the key down.
+
+To add one, put `key_url` in the entry and let sync.py fetch it:
+
+```sh
+./sync.py repos fetch-key github-cli   # writes keys/github-cli.asc
+git add keys/github-cli.asc            # review it, then commit
+```
+
+Most vendors serve a binary `.gpg`; `fetch-key` armors it on the way in so
+everything in `keys/` stays diffable text. When a vendor rotates their key, apt
+starts failing - re-run `fetch-key` and commit the diff.
+
 ## Tests
 
 ```sh
@@ -164,9 +235,15 @@ the tool degrades gracefully with no supported package manager rather than
 crashing. It skips with a clear message when neither podman nor docker is usable.
 Podman is preferred and works rootless.
 
+Tier 1 points `PERSONAL_CONFIG_SYSROOT` at a temp directory, which relocates the
+`/etc` paths a repository writes to. Setting it also drops `sudo` and suppresses
+the metadata refresh, so the suite can exercise the privileged write path without
+a password prompt, a network fetch, or any risk to the real machine.
+
 Two known gaps: **brew/macOS can't be containerized**, so its command construction
-is covered by unit tests only; and `packages install` assumes the system package
-manager's metadata is current - sync.py never runs `apt update` itself.
+is covered by unit tests only; and outside of adding a repository, `packages
+install` still assumes the system package manager's metadata is current - sync.py
+runs `apt-get update` only when a repository it manages actually changed.
 
 ## TODO
 
@@ -208,7 +285,26 @@ Should support pulling and running package archives.
 
 Should support Appimage files
 
-### Adding third party package repositories
+### Bring this machine's existing repositories under management
 
-Should support adding third party package repositories to then pull from
+This laptop still carries third-party repositories added by hand before `repo`
+blocks existed: docker, vscode, mozilla, mullvad, tailscale, spotify,
+claude-desktop, and the keyd and papirus PPAs. Each is expressible today - one
+`repo` block, one `fetch-key`, one commit apiece.
+
+A PPA needs no special handling: it's
+`uris: https://ppa.launchpadcontent.net/<owner>/<name>/ubuntu/`, `suites: "auto"`,
+`components: main`, plus its Launchpad key. No `add-apt-repository` needed.
+
+### Third party repositories for the other managers
+
+Only `apt` is implemented. dnf is the natural next one - a `.repo` INI file in
+`/etc/yum.repos.d/`, which is the same "render bytes to a privileged path" shape,
+so it reuses `write_privileged`, `repo_state` and `REFRESH_CMDS` and needs no
+schema change. `brew tap` won't fit that mould, since a tap is a command rather
+than a file. pacman needs an edit to `/etc/pacman.conf`, which has no drop-in
+directory, so it's the messiest and least worth doing.
+
+One known limitation: `uris` is literal, so a vendor that splits by distro
+(`download.docker.com/linux/ubuntu` vs `.../debian`) is pinned to one of them.
 
