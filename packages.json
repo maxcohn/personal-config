@@ -2,6 +2,10 @@
 	"audacity": {},
 	"fzf": {},
 	"git": {},
+	"github-cli": {
+		"apt": null,
+		"brew": "gh"
+	},
 	"libreoffice": {},
 	"pandoc": {},
 	"ripgrep": {},
