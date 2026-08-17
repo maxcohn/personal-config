@@ -1,7 +1,12 @@
 {
-	"git": {},
-	"vim": {},
-	"ripgrep": {},
 	"fzf": {},
-	"shellcheck": {}
+	"git": {},
+	"ripgrep": {},
+	"shellcheck": {},
+	"tokei": {
+		"_": "CLOC implementation in Rust",
+		"apt": null,
+		"cargo": "tokei"
+	},
+	"vim": {}
 }
