@@ -32,6 +32,7 @@
 		"brew": "moreutils"
 	},
 	"nmap": {
+		"apt": "nmap",
 		"brew": "nmap"
 	},
 	"pandoc": {
