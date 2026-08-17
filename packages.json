@@ -51,6 +51,10 @@
 		"brew": "tokei",
 		"cargo": "tokei"
 	},
+	"tree": {
+		"apt": "tree",
+		"brew": "tree"
+	},
 	"vim": {
 		"_": "Preinstalled on MacOS.",
 		"apt": "vim",
