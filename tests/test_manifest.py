@@ -155,11 +155,10 @@ class TestPackagesJson(unittest.TestCase):
                 self.assertIn(prefer, entry, "prefer names a method not on this entry")
 
     def test_every_entry_installable_somewhere(self):
-        """An entry with every method nulled out is dead weight."""
+        """Methods are never inferred, so an entry naming none is dead weight."""
         for name, entry in self.entries():
             with self.subTest(package=name):
-                usable = [k for k in KNOWN_METHODS
-                          if k not in entry or entry.get(k) is not None]
+                usable = [k for k in KNOWN_METHODS if entry.get(k) is not None]
                 self.assertTrue(usable, "no method can ever install this")
 
 

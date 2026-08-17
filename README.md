@@ -71,14 +71,16 @@ This repo is public - nothing private should ever land in a tracked file.
 
 ## Software (`packages.json`)
 
-One entry per logical tool. The key is the name used everywhere unless an
-install method says otherwise, so the common case is an empty object:
+One entry per logical tool. The key is identification only - how you refer to
+the tool here, and the default name of the binary it puts on the machine.
+
+Each package manager can be specified if it can be installed with it.
 
 ```json
 {
-	"ripgrep": {},
+	"ripgrep": { "apt": "ripgrep", "brew": "ripgrep" },
 	"fd": { "apt": "fd-find", "bin": "fdfind" },
-	"xclip": { "brew": null },
+	"xclip": { "apt": "xclip", "brew": null },
 	"eza": { "_": "This is a comment", "apt": null, "cargo": "eza@0.18.0" },
 	"shellcheck": {
 		"release": {
@@ -97,11 +99,13 @@ apart on their own.
 
 ### Install methods
 
-**System managers** - `apt`, `pacman`, `dnf`, `brew`. Omit the key to use the
-entry name; give a string to rename; give `null` to skip the package on that
-manager. Prefix a brew value with `cask:` for casks, or a pacman value with
-`aur:` to route it through `paru`/`yay` (reported as manual if neither is
-installed).
+**System managers** - `apt`, `pacman`, `dnf`, `brew`. Give a string naming the
+package on that manager; give `null` to record that it's deliberately
+unavailable there. Omitting the key has the same effect as `null` - the manager
+won't install the tool - so `null` is worth writing when the answer is *checked
+and no* rather than *not looked into yet*. Prefix a brew value with `cask:` for
+casks, or a pacman value with `aur:` to route it through `paru`/`yay` (reported
+as manual if neither is installed).
 
 **Language installers** - `cargo`, `go`, `uv`. Value is `name` or
 `name@version`; for `go`, the full module path. Only considered when the
@@ -168,7 +172,6 @@ manager's metadata is current - sync.py never runs `apt update` itself.
 
 ### Misc
 
-- Implement the `build` install method.
 - Misc scripts to run on sync. Should be idempotent and allow for that last layer of flexibility in the system
 - Module destinations: `destination` may become an object keyed by OS
 (`{"default": "~/.config/x", "darwin": "~/Library/x"}`) if a config ever needs

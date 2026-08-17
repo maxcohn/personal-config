@@ -36,7 +36,7 @@ LOCAL_BIN = HOME / ".local" / "bin"
 
 SYSTEM_MANAGERS = ["apt", "pacman", "dnf", "brew"]
 LANG_INSTALLERS = ["cargo", "go", "uv"]
-NON_METHOD_KEYS = {"prefer", "bin"}
+NON_METHOD_KEYS = {"prefer", "bin", "_"}  # "_" is a per-package comment
 
 DEFAULT_OS_MAP = {"linux": "linux", "darwin": "darwin"}
 DEFAULT_ARCH_MAP = {"x86_64": "x86_64", "amd64": "x86_64", "arm64": "aarch64", "aarch64": "aarch64"}
@@ -203,19 +203,17 @@ def save_receipt(name, method, version):
         json.dump(receipts, f, indent=2)
 
 
-def resolve(name, entry, sysmgr):
+def resolve(entry, sysmgr):
     """Ordered (method, spec) candidates for a package entry."""
     candidates = []
-    if sysmgr:
-        spec = entry.get(sysmgr, name)  # omitted manager key = same name as entry
-        if spec is not None:
-            candidates.append((sysmgr, spec))
+    if sysmgr and entry.get(sysmgr) is not None:
+        candidates.append((sysmgr, entry[sysmgr]))
     for lang in LANG_INSTALLERS:
-        if entry.get(lang) is not None and lang in entry and shutil.which(lang):
+        if entry.get(lang) is not None and shutil.which(lang):
             candidates.append((lang, entry[lang]))
-    if entry.get("release") is not None and "release" in entry:
+    if entry.get("release") is not None:
         candidates.append(("release", entry["release"]))
-    if entry.get("build") is not None and "build" in entry:
+    if entry.get("build") is not None:
         candidates.append(("build", entry["build"]))
     prefer = entry.get("prefer")
     if prefer:
@@ -387,7 +385,7 @@ def cmd_packages(args):
 
     resolved = {}  # name -> (method, spec, state)
     for name, entry in packages.items():
-        candidates = resolve(name, entry, sysmgr)
+        candidates = resolve(entry, sysmgr)
         if not candidates:
             resolved[name] = (None, None, "skipped (no available method)")
             continue

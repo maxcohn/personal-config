@@ -25,12 +25,14 @@ RUNTIME = container_runtime()
 REBUILD = os.environ.get("PC_TEST_REBUILD") == "1"
 ONLY_DISTRO = os.environ.get("PC_TEST_DISTRO")
 
-# Per-distro: a package guaranteed present in the base image, and one to install.
+# Per-distro: its manager, a package guaranteed present in the base image, and
+# one to install. Package names are always spelled out, as packages.json requires.
 DISTROS = {
-    "debian": {"preinstalled": "python3", "installable": "tree"},
-    "arch": {"preinstalled": "python", "installable": "tree"},
-    "fedora": {"preinstalled": "python3", "installable": "tree"},
-    "alpine": {"preinstalled": None, "installable": None},  # no supported manager
+    "debian": {"manager": "apt", "preinstalled": "python3", "installable": "tree"},
+    "arch": {"manager": "pacman", "preinstalled": "python", "installable": "tree"},
+    "fedora": {"manager": "dnf", "preinstalled": "python3", "installable": "tree"},
+    "alpine": {"manager": None, "preinstalled": None,  # no supported manager
+               "installable": None},
 }
 
 _built = set()
@@ -133,12 +135,13 @@ class ManagedDistroCase(ContainerCase):
         return """
             cat > /repo/packages.json <<'EOF'
 {{
-	"{pre}": {{}},
-	"{inst}": {{}},
-	"definitely-not-real-xyz": {{}}
+	"{pre}": {{ "{mgr}": "{pre}" }},
+	"{inst}": {{ "{mgr}": "{inst}" }},
+	"definitely-not-real-xyz": {{ "{mgr}": "definitely-not-real-xyz" }}
 }}
 EOF
-        """.format(pre=info["preinstalled"], inst=info["installable"]) + extra
+        """.format(mgr=info["manager"], pre=info["preinstalled"],
+                   inst=info["installable"]) + extra
 
     def test_detects_preinstalled_and_missing(self):
         info = DISTROS[self.distro]
@@ -163,14 +166,14 @@ EOF
         info = DISTROS[self.distro]
         proc = self.run_in("""
             cat > /repo/packages.json <<'EOF'
-{{ "{inst}": {{}} }}
+{{ "{inst}": {{ "{mgr}": "{inst}" }} }}
 EOF
             python3 sync.py packages status | grep -q missing || {{ echo NOT_MISSING; exit 1; }}
             python3 sync.py packages install
             command -v {inst} >/dev/null || {{ echo BINARY_ABSENT; exit 1; }}
             python3 sync.py packages status | grep -q installed || {{ echo NOT_INSTALLED; exit 1; }}
             echo INSTALL_OK
-        """.format(inst=info["installable"]))
+        """.format(mgr=info["manager"], inst=info["installable"]))
         self.assertIn("INSTALL_OK", proc.stdout)
 
     def test_release_install_over_http(self):
@@ -211,11 +214,11 @@ EOF
         that ship sudo, since the decision keys off euid, not availability."""
         proc = self.run_in("""
             cat > /repo/packages.json <<'EOF'
-{ "fake-pkg-xyz": {} }
+{{ "fake-pkg-xyz": {{ "{mgr}": "fake-pkg-xyz" }} }}
 EOF
-            python3 sync.py packages install --dry-run | grep -q 'sudo' && { echo USED_SUDO; exit 1; }
+            python3 sync.py packages install --dry-run | grep -q 'sudo' && {{ echo USED_SUDO; exit 1; }}
             echo NOSUDO_OK
-        """)
+        """.format(mgr=DISTROS[self.distro]["manager"]))
         self.assertIn("NOSUDO_OK", proc.stdout)
         self.assertNotIn("USED_SUDO", proc.stdout)
 
@@ -240,7 +243,7 @@ class TestAlpine(ContainerCase):
     def test_reports_no_manager_and_skips(self):
         proc = self.run_in("""
             cat > /repo/packages.json <<'EOF'
-{ "ripgrep": {} }
+{ "ripgrep": { "apt": "ripgrep" } }
 EOF
             python3 sync.py packages status
             echo NOMGR_OK
@@ -252,7 +255,7 @@ EOF
     def test_install_with_no_manager_does_nothing(self):
         proc = self.run_in("""
             cat > /repo/packages.json <<'EOF'
-{ "ripgrep": {} }
+{ "ripgrep": { "apt": "ripgrep" } }
 EOF
             python3 sync.py packages install
             echo NOINSTALL_OK

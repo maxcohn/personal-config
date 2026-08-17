@@ -160,7 +160,8 @@ class TestPackagesDryRun(Sandbox):
         self.module("shell", "~/", {".shrc": "x\n"})
 
     def test_status_reports_resolution(self):
-        self.packages({"definitely-not-a-real-package-xyz": {}})
+        self.packages({"definitely-not-a-real-package-xyz":
+                       {"apt": "definitely-not-a-real-package-xyz"}})
         proc = self.sync("packages", "status", "--manager", "apt", expect=0)
         self.assertIn("missing", proc.stdout)
         self.assertIn("via apt", proc.stdout)
@@ -187,18 +188,24 @@ class TestPackagesDryRun(Sandbox):
         proc = self.sync("packages", "status", "--manager", "apt", expect=0)
         self.assertIn("skipped", proc.stdout)
 
+    def test_entry_naming_no_method_is_skipped(self):
+        """Nothing is inferred from the entry key, so this can't install."""
+        self.packages({"ripgrep": {}})
+        proc = self.sync("packages", "status", "--manager", "apt", expect=0)
+        self.assertIn("skipped", proc.stdout)
+
     def test_unknown_manager_errors(self):
-        self.packages({"git": {}})
+        self.packages({"git": {"apt": "git"}})
         proc = self.sync("packages", "status", "--manager", "nonesuch", expect=1)
         self.assertIn("not found on PATH", proc.stderr)
 
     def test_path_warning_when_local_bin_absent(self):
-        self.packages({"git": {}})
+        self.packages({"git": {"apt": "git"}})
         proc = self.sync("packages", "status", "--manager", "apt", path="/usr/bin:/bin")
         self.assertIn("not on PATH", proc.stdout)
 
     def test_path_warning_suppressed_when_present(self):
-        self.packages({"git": {}})
+        self.packages({"git": {"apt": "git"}})
         proc = self.sync("packages", "status", "--manager", "apt",
                          path="{}/.local/bin:/usr/bin:/bin".format(self.home))
         self.assertNotIn("not on PATH", proc.stdout)

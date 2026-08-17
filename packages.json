@@ -1,21 +1,39 @@
 {
-	"audacity": {},
-	"deluge": {},
-	"fzf": {},
-	"git": {},
+	"audacity": {
+		"apt": "audacity"
+	},
+	"deluge": {
+		"apt": "deluge"
+	},
+	"fzf": {
+		"apt": "fzf"
+	},
+	"git": {
+		"apt": "git"
+	},
 	"github-cli": {
-		"apt": null,
 		"brew": "gh"
 	},
-	"libreoffice": {},
-	"pandoc": {},
-	"ripgrep": {},
-	"shellcheck": {},
+	"libreoffice": {
+		"apt": "libreoffice"
+	},
+	"pandoc": {
+		"apt": "pandoc"
+	},
+	"ripgrep": {
+		"apt": "ripgrep"
+	},
+	"shellcheck": {
+		"apt": "shellcheck"
+	},
 	"tokei": {
 		"_": "CLOC implementation in Rust",
-		"apt": null,
 		"cargo": "tokei"
 	},
-	"vim": {},
-	"vlc": {}
+	"vim": {
+		"apt": "vim"
+	},
+	"vlc": {
+		"apt": "vlc"
+	}
 }

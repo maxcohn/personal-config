@@ -26,19 +26,24 @@ class TestResolve(unittest.TestCase):
     def resolve(self, entry, sysmgr="apt", have=()):
         """Resolve with shutil.which faked to only find the named tools."""
         with mock.patch.object(sync.shutil, "which", lambda t: t if t in have else None):
-            return sync.resolve("thing", entry, sysmgr)
+            return sync.resolve(entry, sysmgr)
 
-    def test_omitted_manager_defaults_to_entry_name(self):
-        self.assertEqual(self.resolve({}), [("apt", "thing")])
-
-    def test_rename(self):
+    def test_manager_names_the_package(self):
         self.assertEqual(self.resolve({"apt": "thing-bin"}), [("apt", "thing-bin")])
 
+    def test_omitted_manager_is_skipped(self):
+        """Names are never guessed from the entry key -- that's the collision."""
+        self.assertEqual(self.resolve({}), [])
+
     def test_null_skips_manager(self):
+        """Explicit null reads as 'deliberately unavailable'; same effect."""
         self.assertEqual(self.resolve({"apt": None}), [])
 
+    def test_other_managers_dont_leak_in(self):
+        self.assertEqual(self.resolve({"pacman": "thing"}), [])
+
     def test_no_system_manager_detected(self):
-        self.assertEqual(self.resolve({}, sysmgr=None), [])
+        self.assertEqual(self.resolve({"apt": "thing"}, sysmgr=None), [])
 
     def test_language_installer_requires_toolchain(self):
         entry = {"apt": None, "cargo": "thing@1.0"}
@@ -46,17 +51,19 @@ class TestResolve(unittest.TestCase):
         self.assertEqual(self.resolve(entry, have=("cargo",)), [("cargo", "thing@1.0")])
 
     def test_method_ordering(self):
-        entry = {"cargo": "thing", "release": {"version": "1"}, "build": {"git": "u"}}
+        entry = {"apt": "thing", "cargo": "thing",
+                 "release": {"version": "1"}, "build": {"git": "u"}}
         methods = [m for m, _ in self.resolve(entry, have=("cargo",))]
         self.assertEqual(methods, ["apt", "cargo", "release", "build"])
 
     def test_prefer_overrides_order(self):
-        entry = {"cargo": "thing", "release": {"version": "1"}, "prefer": "release"}
+        entry = {"apt": "thing", "cargo": "thing",
+                 "release": {"version": "1"}, "prefer": "release"}
         methods = [m for m, _ in self.resolve(entry, have=("cargo",))]
         self.assertEqual(methods[0], "release")
 
     def test_prefer_keeps_others_as_fallback(self):
-        entry = {"release": {"version": "1"}, "prefer": "release"}
+        entry = {"apt": "thing", "release": {"version": "1"}, "prefer": "release"}
         methods = [m for m, _ in self.resolve(entry)]
         self.assertEqual(methods, ["release", "apt"])
 
