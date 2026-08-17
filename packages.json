@@ -1,6 +1,9 @@
 {
+	"audacity": {},
 	"fzf": {},
 	"git": {},
+	"libreoffice": {},
+	"pandoc": {},
 	"ripgrep": {},
 	"shellcheck": {},
 	"tokei": {
@@ -8,5 +11,6 @@
 		"apt": null,
 		"cargo": "tokei"
 	},
-	"vim": {}
+	"vim": {},
+	"vlc": {}
 }
