@@ -8,7 +8,6 @@
 		"brew": null
 	},
 	"docker": {
-		"_": "docker-ce pulls containerd.io and docker-ce-cli in as Depends; the plugins do not come along, so they get their own entries. suites is literal because uris is: \"auto\" would ask an Ubuntu-only repo for a Debian codename.",
 		"apt": "docker-ce",
 		"repo": {
 			"apt": {
@@ -39,7 +38,6 @@
 		"brew": null
 	},
 	"github-cli": {
-		"_": "Distro packages of gh lag badly, so this comes from GitHub's own repo.",
 		"apt": "gh",
 		"brew": "gh",
 		"repo": {
@@ -97,7 +95,6 @@
 		"brew": "shellcheck"
 	},
 	"tailscale": {
-		"_": "key_url names the noble key, but Tailscale serves one key for every codename -- and key_url is only ever read by fetch-key, never at install time. suites is literal for the same reason as docker's.",
 		"apt": "tailscale",
 		"repo": {
 			"apt": {
@@ -129,7 +126,7 @@
 		"brew": null
 	},
 	"vscode": {
-		"_": "The code package's postinst writes this same vscode.sources itself, but skips it when a source file already names the repo -- so ours wins and there is no churn.",
+		"_": "The code package's postinst writes this same vscode.sources itself, but skips it when a source file already names the repo.",
 		"apt": "code",
 		"repo": {
 			"apt": {
