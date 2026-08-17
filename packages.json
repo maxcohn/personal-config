@@ -2,5 +2,6 @@
 	"git": {},
 	"vim": {},
 	"ripgrep": {},
-	"fzf": {}
+	"fzf": {},
+	"shellcheck": {}
 }

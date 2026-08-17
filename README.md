@@ -165,7 +165,6 @@ manager's metadata is current - sync.py never runs `apt update` itself.
 ## TODO
 
 - Implement the `build` install method.
-- Per-OS `destination` overrides in module manifests, if a config ever needs them.
 - Misc scripts to run on sync. Should be idempotent and allow for that last layer of flexibility in the system
 - Module destinations: `destination` may become an object keyed by OS
 (`{"default": "~/.config/x", "darwin": "~/Library/x"}`) if a config ever needs
@@ -205,3 +204,4 @@ Should support Appimage files
 ### Adding third party package repositories
 
 Should support adding third party package repositories to then pull from
+
