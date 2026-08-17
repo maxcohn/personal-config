@@ -1,9 +1,11 @@
 {
 	"audacity": {
-		"apt": "audacity"
+		"apt": "audacity",
+		"brew": null
 	},
 	"deluge": {
-		"apt": "deluge"
+		"apt": "deluge",
+		"brew": null
 	},
 	"fzf": {
 		"apt": "fzf",
@@ -11,7 +13,8 @@
 	},
 	"git": {
 		"_": "For MacOS, git is installed by the xcode dev tools. I usually run intot his by attempting to run `git` on a fresh machine.",
-		"apt": "git"
+		"apt": "git",
+		"brew": null
 	},
 	"github-cli": {
 		"brew": "gh"
@@ -20,7 +23,13 @@
 		"brew": "jq"
 	},
 	"libreoffice": {
-		"apt": "libreoffice"
+		"apt": "libreoffice",
+		"brew": null
+	},
+	"moreutils": {
+		"_": "This is a collection of handy little tools, like vidir.",
+		"apt": "moreutils",
+		"brew": "moreutils"
 	},
 	"nmap": {
 		"brew": "nmap"
@@ -44,9 +53,11 @@
 	},
 	"vim": {
 		"_": "Preinstalled on MacOS.",
-		"apt": "vim"
+		"apt": "vim",
+		"brew": null
 	},
 	"vlc": {
-		"apt": "vlc"
+		"apt": "vlc",
+		"brew": null
 	}
 }
