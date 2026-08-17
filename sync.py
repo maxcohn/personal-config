@@ -494,7 +494,8 @@ def system_path(path):
 
 
 def apt_repo_name(pkg_name, spec):
-    return spec.get("name", pkg_name)
+    """The repo's identity: its source-file stem, its keyring stem, its label."""
+    return spec.get("file", pkg_name)
 
 
 def apt_source_dest(name):

@@ -422,8 +422,8 @@ Signed-By: /etc/apt/keyrings/toy.asc
         proc = self.repos("status", expect=0)
         self.assertIn("no third-party repositories apply", proc.stdout)
 
-    def test_shared_name_writes_one_source(self):
-        spec = dict(self.spec, name="shared")
+    def test_shared_file_writes_one_source(self):
+        spec = dict(self.spec, file="shared")
         self.packages({"a": {"apt": "a", "repo": {"apt": spec}},
                        "b": {"apt": "b", "repo": {"apt": spec}}})
         self.repos("install", expect=0)
@@ -431,8 +431,8 @@ Signed-By: /etc/apt/keyrings/toy.asc
         self.assertEqual([p.name for p in sources], ["shared.sources"])
 
     def test_conflicting_definitions_error_without_writing(self):
-        self.packages({"a": {"apt": "a", "repo": {"apt": dict(self.spec, name="shared")}},
-                       "b": {"apt": "b", "repo": {"apt": dict(self.spec, name="shared",
+        self.packages({"a": {"apt": "a", "repo": {"apt": dict(self.spec, file="shared")}},
+                       "b": {"apt": "b", "repo": {"apt": dict(self.spec, file="shared",
                                                               suites="beta")}}})
         proc = self.repos("install", expect=1)
         self.assertIn("shared", proc.stderr)

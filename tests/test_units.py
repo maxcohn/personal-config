@@ -400,9 +400,14 @@ class TestRepoNaming(RepoCase):
     def test_name_defaults_to_the_package(self):
         self.assertEqual(sync.apt_repo_name("github-cli", self.SPEC), "github-cli")
 
-    def test_name_override(self):
-        spec = dict(self.SPEC, name="docker")
+    def test_file_overrides_the_name(self):
+        spec = dict(self.SPEC, file="docker")
         self.assertEqual(sync.apt_repo_name("docker-ce", spec), "docker")
+
+    def test_name_is_not_the_override_key(self):
+        """Reserved for dnf's INI description field; must not silently apply here."""
+        spec = dict(self.SPEC, name="docker")
+        self.assertEqual(sync.apt_repo_name("docker-ce", spec), "docker-ce")
 
     def test_keyring_suffix_follows_the_repo_copy(self):
         self.assertEqual(sync.apt_key_dest("toy", self.SPEC).name, "toy.asc")
@@ -461,15 +466,15 @@ class TestRepoSpecs(RepoCase):
         with mock.patch.object(sync.shutil, "which", lambda t: t):
             self.assertEqual(sync.repo_specs({"toy": entry}, "apt"), {})
 
-    def test_shared_name_collapses(self):
-        spec = dict(self.SPEC, name="shared")
+    def test_shared_file_collapses(self):
+        spec = dict(self.SPEC, file="shared")
         packages = {"a": {"apt": "a", "repo": {"apt": spec}},
                     "b": {"apt": "b", "repo": {"apt": spec}}}
         self.assertEqual(list(sync.repo_specs(packages, "apt")), ["shared"])
 
     def test_conflicting_definitions_are_fatal(self):
-        packages = {"a": {"apt": "a", "repo": {"apt": dict(self.SPEC, name="shared")}},
-                    "b": {"apt": "b", "repo": {"apt": dict(self.SPEC, name="shared",
+        packages = {"a": {"apt": "a", "repo": {"apt": dict(self.SPEC, file="shared")}},
+                    "b": {"apt": "b", "repo": {"apt": dict(self.SPEC, file="shared",
                                                            suites="beta")}}}
         with self.assertRaises(SystemExit) as ctx:
             sync.repo_specs(packages, "apt")

@@ -166,7 +166,12 @@ alongside the package that needs it:
 ```
 
 Only `apt` is implemented. The block renders to a deb822
-`/etc/apt/sources.list.d/<name>.sources`.
+`/etc/apt/sources.list.d/<file>.sources`.
+
+The inner object is that manager's own vocabulary, not a shared schema - these
+field names are deb822's, lowercased, so `man 5 sources.list` is the reference and
+there's nothing to translate. dnf would spell almost all of it differently
+(`baseurl`, `metalink`, `gpgkey`), which is why the manager key exists.
 
 | Field | Meaning |
 | --- | --- |
@@ -175,7 +180,7 @@ Only `apt` is implemented. The block renders to a deb822
 | `key_url` | Where the key came from. Read by `fetch-key`, **never** at install time |
 | `types` | Defaults to `deb` |
 | `architectures` | Omitted by default, which lets apt use its own architecture list. Set it only for a repo that genuinely publishes one arch |
-| `name` | Source-file stem, defaulting to the package key. Two packages sharing a `name` collapse onto one source file |
+| `file` | Source-file stem, defaulting to the package key. Two packages sharing a `file` collapse onto one source file |
 
 Values are written through **verbatim** - there is no templating. The one
 exception is the keyword `"auto"`, accepted by `suites` (resolved from

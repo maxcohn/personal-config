@@ -187,7 +187,7 @@ class TestRepoBlocks(unittest.TestCase):
                     self.assertIn(mgr, sync.SYSTEM_MANAGERS, "unknown manager -- typo?")
 
     def test_apt_blocks_are_complete(self):
-        allowed = set(sync.APT_REQUIRED) | {"types", "architectures", "name"}
+        allowed = set(sync.APT_REQUIRED) | {"types", "architectures", "file"}
         for name, _entry, spec in self.apt_blocks():
             with self.subTest(package=name):
                 for field in sync.APT_REQUIRED:
