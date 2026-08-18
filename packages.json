@@ -28,6 +28,9 @@
 		"_": "Installed from the repository the docker entry declares.",
 		"apt": "docker-compose-plugin"
 	},
+	"find-fd": {
+		"cargo": "fd-find"
+	},
 	"fzf": {
 		"apt": "fzf",
 		"brew": "fzf"
