@@ -320,6 +320,10 @@ Should support pulling and running package archives.
 
 Should support Appimage files
 
+### NPM support
+
+Allow npm for a language specific package manager.
+When doing this, start with adding https://github.com/oxidecomputer/skepsis.
 
 ### Third party repositories for the other managers
 
