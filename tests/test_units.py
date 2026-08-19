@@ -151,6 +151,31 @@ class TestLanguageInstallCommands(unittest.TestCase):
         self.assertIn("uv tool install black==24.1.0",
                       self.run_install("uv", "black@24.1.0"))
 
+    def test_npm_never_runs_lifecycle_scripts(self):
+        """--ignore-scripts is the only thing standing between a global install and
+        arbitrary registry code running as the user. Don't drop this test."""
+        self.assertIn("--ignore-scripts", self.run_install("npm", "thing@1.0.0"))
+
+    def test_npm_installs_under_local_prefix(self):
+        out = self.run_install("npm", "thing@1.0.0")
+        self.assertIn("--prefix {}".format(sync.LOCAL_BIN.parent), out)
+        self.assertNotIn("sudo", out, "a registry download must never need root")
+
+    def test_npm_scoped_name_survives_verbatim(self):
+        """rsplit("@", 1) -- what cargo and uv do -- turns "@oxide/x" into ("", "oxide/x")."""
+        self.assertIn("@oxide/skepsis@0.3.0", self.run_install("npm", "@oxide/skepsis@0.3.0"))
+
+
+class TestNpmPinning(unittest.TestCase):
+    def test_pinned(self):
+        self.assertTrue(sync.npm_is_pinned("skepsis@0.3.0"))
+        self.assertTrue(sync.npm_is_pinned("@oxide/skepsis@0.3.0"))
+
+    def test_unpinned(self):
+        self.assertFalse(sync.npm_is_pinned("skepsis"))
+        self.assertFalse(sync.npm_is_pinned("@oxide/skepsis"),
+                         "a scope sigil is not a version separator")
+
 
 class TestReleaseUrl(unittest.TestCase):
     SPEC = {

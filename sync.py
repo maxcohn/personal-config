@@ -45,7 +45,7 @@ APT_SOURCES_DIR = SYSROOT / "etc/apt/sources.list.d"
 APT_KEYRINGS_DIR = SYSROOT / "etc/apt/keyrings"
 
 SYSTEM_MANAGERS = ["apt", "pacman", "dnf", "brew"]
-LANG_INSTALLERS = ["cargo", "go", "uv"]
+LANG_INSTALLERS = ["cargo", "go", "uv", "npm"]
 NON_METHOD_KEYS = {"prefer", "bin", "_", "repo"}  # "_" is a per-package comment
 
 DEFAULT_OS_MAP = {"linux": "linux", "darwin": "darwin"}
@@ -366,6 +366,11 @@ def install_via_system(mgr, specs, dry_run):
             print("  no AUR helper (paru/yay) found; install manually: {}".format(", ".join(aur)))
 
 
+def npm_is_pinned(spec):
+    """A scoped name starts with "@", so the version separator is never at index 0."""
+    return spec.rfind("@") > 0
+
+
 def install_via_lang(lang, spec, dry_run):
     if lang == "cargo":
         if "@" in spec:
@@ -381,6 +386,12 @@ def install_via_lang(lang, spec, dry_run):
             run_or_print(["uv", "tool", "install", "{}=={}".format(pkg, version)], dry_run)
         else:
             run_or_print(["uv", "tool", "install", spec], dry_run)
+    elif lang == "npm":
+        # --ignore-scripts, or every dependency's install hooks run as you.
+        # --prefix, or npm writes to a root-owned /usr/local.
+        # spec passes through verbatim: rsplit("@") would maul a scoped name.
+        run_or_print(["npm", "install", "--global", "--ignore-scripts",
+                      "--prefix", str(LOCAL_BIN.parent), spec], dry_run)
 
 
 def cmd_packages(args):
@@ -390,7 +401,7 @@ def cmd_packages(args):
         sys.exit("package manager not found on PATH: {}".format(sysmgr))
     print("system package manager: {}".format(sysmgr or "none detected"))
     if str(LOCAL_BIN) not in os.environ.get("PATH", "").split(os.pathsep):
-        print("warning: {} is not on PATH; release-installed tools won't be runnable"
+        print("warning: {} is not on PATH; release- and npm-installed tools won't be runnable"
               .format(LOCAL_BIN))
 
     # Some packages only exist behind a third-party repo, so those come first.

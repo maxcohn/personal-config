@@ -29,7 +29,9 @@
 		"apt": "docker-compose-plugin"
 	},
 	"find-fd": {
-		"cargo": "fd-find"
+		"_": "The fd gets it's binary and package names a bit twisted depending on the system. We'll assume it'll be under `fd`.",
+		"cargo": "fd-find",
+		"bin": "fd"
 	},
 	"fzf": {
 		"apt": "fzf",
@@ -54,6 +56,7 @@
 		}
 	},
 	"jq": {
+		"apt": "jq",
 		"brew": "jq"
 	},
 	"libreoffice": {
@@ -96,6 +99,10 @@
 	"shellcheck": {
 		"apt": "shellcheck",
 		"brew": "shellcheck"
+	},
+	"skepsis": {
+		"_": "Local git diff/code review",
+		"npm": "@oxide/skepsis@0.3.0"
 	},
 	"tailscale": {
 		"apt": "tailscale",

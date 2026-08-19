@@ -86,6 +86,7 @@ Each package manager can be specified if it can be installed with it.
 	"fd": { "apt": "fd-find", "bin": "fdfind" },
 	"xclip": { "apt": "xclip", "brew": null },
 	"eza": { "_": "This is a comment", "apt": null, "cargo": "eza@0.18.0" },
+	"skepsis": { "npm": "@oxide/skepsis@0.3.0" },
 	"shellcheck": {
 		"release": {
 			"url": "https://github.com/koalaman/shellcheck/releases/download/v{version}/shellcheck-v{version}.{os}.{arch}.tar.xz",
@@ -111,9 +112,12 @@ and no* rather than *not looked into yet*. Prefix a brew value with `cask:` for
 casks, or a pacman value with `aur:` to route it through `paru`/`yay` (reported
 as manual if neither is installed).
 
-**Language installers** - `cargo`, `go`, `uv`. Value is `name` or
+**Language installers** - `cargo`, `go`, `uv`, `npm`. Value is `name` or
 `name@version`; for `go`, the full module path. Only considered when the
 toolchain is on `PATH`.
+
+`npm` requires a version, always runs with `--ignore-scripts`, and set's the
+`--prefix` to be `~/.local`.
 
 **`release`** - a prebuilt binary from a release page.
 
@@ -131,8 +135,8 @@ Installed versions are recorded in
 `status` can report *outdated* against the pinned version without shelling out
 to `--version`. Detection looks in `~/.local/bin` directly rather than at `PATH`,
 so a release install is still reported correctly on a machine that hasn't been
-set up yet - but `packages` warns when `~/.local/bin` isn't on `PATH`, since the
-tools won't actually be runnable there.
+set up yet - but `packages` warns when `~/.local/bin` isn't on `PATH`, since
+neither release- nor npm-installed tools will actually be runnable there.
 
 **`prefer`** - name a method to use even when an earlier one is available.
 Without it, the order is: system manager -> language installer (if the toolchain
@@ -319,11 +323,6 @@ Should support pulling and running package archives.
 ### Appimage support
 
 Should support Appimage files
-
-### NPM support
-
-Allow npm for a language specific package manager.
-When doing this, start with adding https://github.com/oxidecomputer/skepsis.
 
 ### Third party repositories for the other managers
 

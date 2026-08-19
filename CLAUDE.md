@@ -2,6 +2,7 @@
 
 `README.md` is the spec. It documents every schema and convention here, and it is
 kept accurate — when behaviour changes, the README changes in the same commit.
+Keep it terse: state the rule, not a paragraph arguing for it.
 
 ## Comments
 

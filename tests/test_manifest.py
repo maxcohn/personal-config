@@ -114,6 +114,24 @@ class TestPackagesJson(unittest.TestCase):
                     with self.subTest(package=name, manager=mgr):
                         self.assertIsInstance(entry[mgr], (str, type(None)))
 
+    def test_language_installer_values_are_strings(self):
+        for name, entry in self.entries():
+            for lang in sync.LANG_INSTALLERS:
+                if lang in entry:
+                    with self.subTest(package=name, installer=lang):
+                        self.assertIsInstance(entry[lang], (str, type(None)))
+
+    def test_npm_entries_are_pinned(self):
+        """sync.py doesn't re-check at runtime, so an unpinned npm spec -- which
+        would install whatever "latest" is that day -- has to fail here."""
+        for name, entry in self.entries():
+            spec = entry.get("npm")
+            if spec is None:
+                continue
+            with self.subTest(package=name):
+                self.assertTrue(sync.npm_is_pinned(spec),
+                                "npm value needs an explicit @version")
+
     def test_release_entries_are_complete(self):
         for name, entry in self.entries():
             spec = entry.get("release")

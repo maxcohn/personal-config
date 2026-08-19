@@ -172,6 +172,22 @@ class TestPackagesDryRun(Sandbox):
                          expect=0)
         self.assertIn("apt install -y fake-pkg", proc.stdout)
 
+    def test_npm_install_command(self):
+        """The whole npm contract in one line: no lifecycle scripts, no sudo, a
+        prefix under HOME, and a scoped name passed through intact."""
+        bindir = self.tmp / "bin"
+        self.write(bindir / "npm", "#!/bin/sh\nexit 0\n").chmod(0o755)
+        self.packages({"skepsis": {"npm": "@oxide/skepsis@0.3.0"}})
+        proc = self.sync("packages", "install", "--dry-run", path=str(bindir), expect=0)
+        self.assertIn("npm install --global --ignore-scripts --prefix {}/.local "
+                      "@oxide/skepsis@0.3.0".format(self.home), proc.stdout)
+        self.assertNotIn("sudo", proc.stdout)
+
+    def test_npm_not_offered_without_toolchain(self):
+        self.packages({"skepsis": {"npm": "@oxide/skepsis@0.3.0"}})
+        proc = self.sync("packages", "status", path="", expect=0)
+        self.assertIn("skipped", proc.stdout)
+
     def test_build_entry_reports_not_implemented(self):
         self.packages({"neovim": {"apt": None,
                                   "build": {"git": "https://x", "ref": "v1"}}})
