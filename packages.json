@@ -152,5 +152,9 @@
 				"key_url": "https://packages.microsoft.com/keys/microsoft.asc"
 			}
 		}
+	},
+	"wl-clipboard": {
+		"_": "Includes wl-copy and wl-paste for interacting with the Wayland clipboard.",
+		"apt": "wl-clipboard"
 	}
 }
