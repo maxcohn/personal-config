@@ -30,7 +30,8 @@
 	},
 	"du-dust": {
 		"_": "du alternative with nicer output",
-		"cargo": "du-dust"
+		"cargo": "du-dust",
+		"bin": "dust"
 	},
 	"find-fd": {
 		"_": "The fd gets it's binary and package names a bit twisted depending on the system. We'll assume it'll be under `fd`.",
