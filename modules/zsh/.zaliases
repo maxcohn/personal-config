@@ -8,7 +8,11 @@ alias egrep='egrep --color=auto'
 
 alias more=less
 
-alias open=xdg-open
+# Conditionally set open on Linux
+case "$(uname -s)" in
+  Darwin) alias open='open' ;;
+  Linux)  alias open='xdg-open' ;;
+esac
 
 # for when the side of my space bar doesn't work
 alias cd..='cd ..'
