@@ -1,0 +1,19 @@
+## LinkedIn
+# These are unstable because LinkedIn messes with stuff constantly
+
+# Block suggested posts on LinkedIn (as of 2026-09-10)
+linkedin.com##:matches-path(/feed/):xpath(//span[text()[contains(.,'Suggested')]]/../../../../../../../../..)
+
+# Remove LinkedIn news pane (as of 2026-09-10)
+linkedin.com##p:has-text(/LinkedIn News/):upward(5)
+
+# Remove the LinkedIn puzzles pane (as of 2026-09-10)
+linkedin.com##p:has-text(/Today.s puzzles/):upward(6)
+
+## Hacker News
+# Block political related posts on HN. I'm there for tech news, not politics.
+# HN then has two more <tr>s afterwards - one for the comment link and one for spacing
+# These should generally be stable because HN doesn't change their site.
+news.ycombinator.com##.submission:has-text(/trump|doge/i)
+news.ycombinator.com##.submission:has-text(/trump|doge/i) + tr
+news.ycombinator.com##.submission:has-text(/trump|doge/i) + tr + tr
