@@ -2,7 +2,7 @@
 # These are unstable because LinkedIn messes with stuff constantly
 
 # Block suggested posts on LinkedIn (as of 2026-09-10)
-linkedin.com##:matches-path(/feed/):xpath(//span[text()[contains(.,'Suggested')]]/../../../../../../../../..)
+linkedin.com##:matches-path(/feed/) span:has-text(Suggested):upward(9)
 
 # Remove LinkedIn news pane (as of 2026-09-10)
 linkedin.com##p:has-text(/LinkedIn News/):upward(5)
