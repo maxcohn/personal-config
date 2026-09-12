@@ -68,6 +68,9 @@
 		"apt": "libreoffice",
 		"brew": null
 	},
+	"llm": {
+		"uv": "llm"
+	},
 	"moreutils": {
 		"_": "This is a collection of handy little tools, like vidir.",
 		"apt": "moreutils",
